@@ -31,26 +31,69 @@ blueMSX at its heart; boxes, cartridges and floppies you can turn in your hands.
 
 - A **jailbroken PS5** with a payload loader (for example the PS5 Payload Manager / `elfldr` on port 9021).
 - **ShadowMountPlus** (or another homebrew registrar) so the installed app gets its home-screen tile.
-- Your own MSX games (none are included).
+- Your own MSX games (none are included); an internet connection on the PS5 for the box art.
 
 ## Install
 
-1. Download **`MSXPS5-v1.0.zip`** from the [Releases](../../releases) page and unzip it to get **`MSXPS5.elf`**.
-2. Send it with your payload loader. It installs the app to `/data/homebrew/PPSA99231` and stays running as the
-   app's helper.
-3. Copy your games to **`/data/msx/roms`** on the PS5 (with an FTP client or a web file manager):
-   cartridges `.rom` `.mx1` `.mx2`, disks `.dsk`, tapes `.cas`, also inside `.zip`.
-4. Open **MSX PS5** from the home screen (if the tile doesn't appear, let ShadowMountPlus rescan or restart the PS5).
+1. Download **`MSXPS5-v1.0.zip`** from the [Releases](../../releases) page and unzip it. Inside are
+   **`MSXPS5.elf`** (the app) and a **`bios`** folder.
+2. Send `MSXPS5.elf` with your payload loader. It installs the app to `/data/homebrew/PPSA99231` and stays running
+   as the app's helper.
+3. Open **MSX PS5** once from the home screen (if the tile doesn't appear, let ShadowMountPlus rescan or restart the
+   PS5). The app makes its folders in **`/data/msx`**: `roms`, `bios`, `covers`, `saves`, `states`...
+4. Copy the BIOS and your games (below), then open MSX PS5 again.
 
 After a reboot you don't need to send the payload again: the app sends its own helper to the ELF loader when
 none answers.
 
-### BIOS
+## Setup
 
-Cartridge games run without any BIOS file: blueMSX falls back to the free **C-BIOS**. Disk and tape games need a
-real MSX BIOS: copy blueMSX's **`Machines`** and **`Databases`** folders (with the BIOS ROMs you own) to
-**`/data/msx/bios`**. This repository's `system/bluemsx` folder has the machine configurations and the C-BIOS
-machines; the original BIOS ROMs are not included.
+### Copying files to the PS5
+
+Use any way you already have to put files in `/data` on your PS5, for example:
+
+- **FTP** - load an FTP server payload on the PS5, then connect from your computer with an FTP client such as
+  FileZilla (host: the PS5's IP address, port: the one the payload shows, usually 2121).
+- **A web file manager** payload - open its address in your computer's browser and upload from there.
+
+### 1. BIOS (do this first)
+
+Copy the **contents** of the zip's `bios` folder (the `Machines` and `Databases` folders) to **`/data/msx/bios`**:
+
+```
+/data/msx/bios/Machines/...
+/data/msx/bios/Databases/...
+```
+
+That is enough for **cartridge games**: they run on the free **C-BIOS** that comes with it.
+
+**Disk (`.dsk`) and tape (`.cas`) games** need a real MSX BIOS, which can't be shared here. Put the BIOS ROMs you
+own in the matching machine's folder, `/data/msx/bios/Machines/<machine name>/` (its `config.ini` names the files
+it needs), or copy the `Machines` folder of a blueMSX installation that has them over the zip's one.
+Settings > EMULATION > **MSX machine** chooses MSX, MSX2, MSX2+ or MSX turbo R (Auto picks one by the game).
+
+### 2. Games
+
+Copy your games to **`/data/msx/roms`** (subfolders are fine):
+
+- cartridges: `.rom` `.mx1` `.mx2`
+- disks: `.dsk`
+- tapes: `.cas`
+- any of them inside a `.zip`
+
+The shelf lists them by name; games are recognised by their contents, so file names don't have to be exact.
+
+### 3. Covers
+
+Box art, box backs and screenshots are **downloaded by themselves** from
+[libretro-thumbnails](https://github.com/libretro-thumbnails) - the PS5 only needs an internet connection.
+
+- Settings > LIBRARY > **Download covers** turns it on or off.
+- On the shelf, **Square** downloads the selected game's cover again.
+- Downloaded art is kept in `/data/msx/covers`, so it is fetched only once.
+- **Your own cover:** put a `.png` or `.jpg` with the same name as the game file in **`/data/msx/covers`**
+  (for example `/data/msx/covers/Knightmare.png` for `Knightmare.rom`), or next to the game file.
+  Your own art always wins over a download.
 
 ## Controls
 
