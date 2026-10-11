@@ -30,6 +30,7 @@ blueMSX at its heart; boxes, cartridges and floppies you can turn in your hands.
 ## Requirements
 
 - A **jailbroken PS5** with a payload loader (for example the PS5 Payload Manager / `elfldr` on port 9021).
+  Tested on firmware **13.00**.
 - **ShadowMountPlus** (or another homebrew registrar) so the installed app gets its home-screen tile.
 - Your own MSX games (none are included); an internet connection on the PS5 for the box art.
 
@@ -113,6 +114,24 @@ Box art, box backs and screenshots are **downloaded by themselves** from
 In a game, press **L3 + R3** for the menu (resume, save / load state, reset, settings, back to the game list).
 Hold **R2** to fast forward and **L2 + R2** to rewind. The MSX joystick and keys are mapped to the PS5 buttons in
 Settings > CONTROLS, for all games or for one game.
+
+**Blowing on a cartridge** uses the controller's built-in microphone, so it has to be on: if the mic button's
+light is orange, press it once (the bottom line on the screen tells you).
+
+## Updating
+
+Send the new `MSXPS5.elf` the same way. Your games, BIOS, covers, settings, saves (`/data/msx/saves`) and save
+states (`/data/msx/states`) are kept.
+
+## Troubleshooting
+
+- **"No games found"** - the games aren't in `/data/msx/roms`, or have an extension the shelf doesn't list.
+- **A disk or tape game asks for the MSX BIOS** - see [BIOS](#1-bios-do-this-first): those need the real BIOS ROMs.
+- **No covers** - check the PS5's internet connection and Settings > LIBRARY > Download covers; a few games simply
+  have no art in libretro-thumbnails (add your own).
+- **The tile isn't on the home screen** - let ShadowMountPlus rescan, or restart the PS5 and send the payload again.
+- **Something else** - the app writes its log to `/data/msx/logs/boot.log`; please attach it to an
+  [issue](../../issues).
 
 ## Build from source
 
