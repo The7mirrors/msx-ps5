@@ -1,0 +1,67 @@
+// MSX PS5 frontend: settings kept in /data/msx/msx-ps5.ini (key=value lines).
+// SPDX-License-Identifier: MIT
+#pragma once
+
+#include <string>
+
+namespace fe
+{
+struct Settings
+{
+	// video
+	int scale = 0; // ps5video::Scale: fit, integer, stretch
+	int shader = 1; // ps5crt::Shader: 0 off, 1 "CRT Easymode style" (the default for every game), ...
+	int aspect = 0; // emu::kAspects: the core's (TV), square pixels, 4:3, 16:9
+	int ntsc = 0; // emu::kNtscFilters: off, composite, S-Video, RGB, monochrome (Blargg's NTSC filter)
+	int borders = 0; // emu::kBorders: off, top/bottom, left/right, full (the core's overscan option)
+	bool gg_lcd = true; // Game Gear LCD ghosting
+	bool smooth = false; // bilinear when the scale isn't whole
+	bool scanlines = false;
+	bool show_fps = false;
+	// audio
+	bool audio = true;
+	int volume = 100; // 0..100
+	int fm_chip = 0; // emu::kFmChips
+	int shelf_music = 2;      // the shelf's background music: 0 off, else fe_music's track (1-based; 2 Ambient Drift, the user's pick)
+	int shelf_music_volume = 40; // 0..100 (user: the music was loud at half the headphones' volume)
+	bool shelf_sounds = true; // the shelf's and the menus' sound effects
+	bool lowpass = false; // the core's low-pass audio filter
+	// emulation
+	int ff_speed = 300; // % while R2 is held; 0 = as fast as possible
+	bool rewind = true; // L2 + R2 rewinds
+	int region = 0; // emu::kRegions: auto, USA, Europe, Japan
+	bool no_sprite_limit = false;
+	int state_slot = 1; // 1..10
+	// controls
+	int pad_type = 0; // emu::kPadTypes: the D-pad drives the joystick and the cursor keys, the joystick, the keys
+	int multitap = 0; // (unused)
+	// the PS5 button (index in emu::kPs5Buttons: 0 Cross, 1 Circle, 2 Square, 3 Triangle, 4 L1, 5 R1, 6 OPTIONS,
+	// 7 touchpad, 8 none) of each MSX button and key, in emu::kConsoleButtons' order: joystick 1, joystick 2, Space,
+	// Return, Esc, F1..F5, M, N, Graph, Ctrl, Shift, Stop, Select, on-screen keyboard.
+	static constexpr int kButtons = 18;
+	static constexpr int kDefaultButtons[kButtons] = {0, 1, 0, 2, 3, 6, 4, 5, 8, 8, 8, 8, 8, 8, 8, 8, 8, 7};
+	int buttons[kButtons] = {0, 1, 0, 2, 3, 6, 4, 5, 8, 8, 8, 8, 8, 8, 8, 8, 8, 7};
+	void DefaultButtons();
+	// per-game controls (user request 2026-10-11): `buttons` are the ones in use; all_buttons the all-games ones
+	// (msx-ps5.ini); while a game runs, its own file (/data/msx/controls/<game file>.ini) if it has one
+	int all_buttons[kButtons] = {0, 1, 0, 2, 3, 6, 4, 5, 8, 8, 8, 8, 8, 8, 8, 8, 8, 7};
+	std::string game_controls; // the running game's controls file ("" on the shelf)
+	void BeginGameControls(const std::string& rom); // a game starts: its buttons, else the all-games ones
+	void EndGameControls();                          // back to the all-games buttons
+	void SaveGameControls() const;                   // the buttons in use become the game's own
+	void ForgetGameControls();                       // the game uses the all-games buttons again
+	bool GameHasControls() const;
+	// library
+	bool covers_download = true; // fetch box art from libretro-thumbnails
+	bool debug_logs = true;      // boot.log and the others in /data/msx/logs (OrbisLogSetEnabled)
+	int shelf_family = 0; // fe::Family the shelf shows
+	int shelf_style = 0;  // the games on the shelf: 0 their boxes, 1 their cartridges / floppies, 2 all floppies
+	bool one_version = true; // the shelf shows one version of each game (fe::OneOfEach)
+	std::string last_rom; // the shelf puts the selection on this game
+
+	void Load();
+	void Save() const;
+};
+
+Settings& Config();
+} // namespace fe

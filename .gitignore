@@ -1,0 +1,5 @@
+*.o
+*.so
+.vscode/pro-deployer.json
+bluemsx_libretro_emscripten.bc
+ps5/build/

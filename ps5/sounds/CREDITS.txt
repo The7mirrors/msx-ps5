@@ -1,0 +1,8 @@
+MSX PS5 shelf sounds (all CC0 / public domain - no attribution required, listed with thanks):
+- floppy_insert.wav: "Inserting floppy disk and closing drive latch" by micropolis, freesound.org/s/636260 (CC0)
+- floppy_seek.wav:   "reading_floppy_disc_1.wav" by KRAFTWERK2K1, freesound.org/s/39699 (CC0)
+- cart_clack.wav:    "Cartridge" by CrimsonGalaxies, freesound.org/s/723363 (CC0)
+- browse, menu_move, menu_ok, menu_back, open, close, favorite: Kenney "Interface Sounds" 1.0, kenney.nl (CC0)
+  (tick_002, click_002, select_002, back_002, toggle_001 (open), toggle_004 (close), confirmation_002, scratch_004 (shutter slide), tick_004 (shutter snap))
+- The background music is an original tune made by the code in frontend/fe_sound.cpp (no recording).
+Cut and levelled with msx-sounds/tools/make_pack.py (decoder: stb_vorbis, public domain).
