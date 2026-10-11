@@ -5,6 +5,19 @@
 <p align="center"><b>An MSX emulator for the PS5, with a 3D game shelf.</b><br>
 blueMSX at its heart; boxes, cartridges and floppies you can turn in your hands.</p>
 
+<p align="center"><img src="docs/screenshots/shelf-boxes.jpg" width="860" alt="The game shelf with boxes"></p>
+
+<table align="center">
+<tr>
+<td><img src="docs/screenshots/shelf-cartridges.jpg" width="420" alt="Cartridges on the shelf"><br><sub>Cartridges</sub></td>
+<td><img src="docs/screenshots/cartridge-blow.jpg" width="420" alt="A cartridge turned to its contacts"><br><sub>Blow on the contacts</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/shelf-floppies.jpg" width="420" alt="Floppy disks on the shelf"><br><sub>Floppy disks</sub></td>
+<td><img src="docs/screenshots/in-game.jpg" width="420" alt="Knightmare II running"><br><sub>Playing</sub></td>
+</tr>
+</table>
+
 ---
 
 ## What it does
