@@ -592,7 +592,7 @@ static unsigned btn_map[EC_KEYCOUNT] =
    RETROK_UNKNOWN,         //EC_TORIKE   68
    RETROK_SPACE,           //EC_SPACE    69
    RETROK_UNKNOWN,         //EC_JIKKOU   70
-   RETROK_UNKNOWN,         //EC_CODE     71
+   RETROK_RALT,            //EC_CODE     71 (MSX PS5: Right Alt - the key right of the space bar)
    RETROK_PAUSE,           //EC_PAUSE    72
 
    // ARROWS

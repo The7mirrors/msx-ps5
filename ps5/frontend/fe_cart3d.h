@@ -20,7 +20,8 @@ enum class Kind
 	Box,       // the game's box (portrait art on the front)
 	BoxWide,   // a landscape box (landscape art on the front)
 	Cartridge, // an MSX ROM cartridge (landscape label)
-	Floppy     // a 3.5" disk (square-ish label)
+	Floppy,    // a 3.5" disk (square-ish label)
+	BoxHalf    // 2026-10-16: one half of a clamshell box (half the depth), for its opening in the play animation
 };
 
 // A picture for a face: row-major A8B8G8R8 with smaller levels (each half the size), for distant games.
@@ -46,6 +47,23 @@ struct Art
 	TexPtr label; // the cartridge's / floppy's label
 	TexPtr disk_label; // a floppy's label (every game has one: the shelf of floppies); null: `label`
 	bool konami = false; // Konami's cartridge (a strip with two holes on the left, a boss on the right end); else generic
+	// Al Alamiah's game cartridge (Sakhr, 1980s Arabic MSX): rounded top corners, matte grained plastic, two holes down
+	// the left, the label across the top two thirds, a raised panel with the logo and grip ribs at the bottom right
+	bool alamiah = false;
+	int half = 0;              // a clamshell's half (Kind::BoxHalf): 1 the lid (the tray inside, moulded), 2 the back half
+	                           // (the manual inside, under the clear sleeve); 3 a normal box's insert (a tray with one
+	                           // big recess for the cartridge, a finger notch, a raised plate at its foot)
+	bool clamshell = false;    // a box of its own (covers/boxes): a black plastic clamshell - the spine sticker on the hinge
+	                           // side only, the side it opens from bare plastic with the halves' seam, black top and bottom
+	bool own_label = false;    // an Arabic cartridge's scanned label: up to the top edge (no plastic above it)
+	bool alamiah_soft = false; // Al Alamiah's software cartridge: the label's foot higher, a hole low on the left, a
+	                           // recessed panel low on the right
+	TexPtr top;                // the cartridge's top, printed (covers/boxes/<name>.top); null: plain plastic
+	TexPtr rear;               // the cartridge's back as a picture, print and mouldings (covers/boxes/<name>.rear)
+	bool tinted = false;       // its plastic coloured, the box's and the cartridge's (covers/boxes/<name>.plastic)
+	float tint[3] = {1, 1, 1}; // (over the black plastic's albedo)
+	bool tall = false;         // the Holy Quran's cartridge (covers/boxes/<name>.cart "tall"): half as tall again, its head
+	                           // (the label) thicker, standing out at the front over the narrower body
 };
 
 // Where and how one object stands. World units: the eye is at the origin looking down +z, y up; the floor is y = 0.
@@ -90,7 +108,7 @@ struct Sprite
 	std::vector<uint8_t> keep;
 };
 // Sizes and clears s for the object at p; false when it is not in view.
-bool Prepare(Sprite& s, const View& v, Kind k, const Pose& p);
+bool Prepare(Sprite& s, const View& v, Kind k, const Pose& p, const Art* art = nullptr);
 // Draws columns [x0, x1) (screen columns, may lie outside the screen) of the object into s, after Prepare.
 void Render(Sprite& s, const View& v, Kind k, const Pose& p, const Art& art, int x0, int x1);
 // Puts s on the surface moved dx pixels to the right, its colours times bright (0..), faded by alpha; columns [x0, x1).

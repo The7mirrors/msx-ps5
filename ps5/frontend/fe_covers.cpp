@@ -44,6 +44,11 @@ namespace fe
 {
 namespace
 {
+// (below: a box of its own over the made one)
+std::shared_ptr<const cart3d::Art> WithOwnBox(std::shared_ptr<const cart3d::Art> made, const fe::GameInfo& g);
+} // namespace
+namespace
+{
 constexpr int kLoadRadius = 12; // textures kept around the selection
 constexpr long kMissingRetrySeconds = 30L * 24 * 3600;
 
@@ -263,7 +268,7 @@ std::shared_ptr<CoverTex> Decode(const std::vector<uint8_t>& file, const GameInf
 	for (uint32_t& p : out)
 		p |= 0xff000000u; // covers are opaque
 	auto tex = MakeTex(out.data(), tw, th);
-	tex->art = MakeArt(out.data(), tw, th, g, shots, box.empty() ? nullptr : box.data(), bw, bh);
+	tex->art = WithOwnBox(MakeArt(out.data(), tw, th, g, shots, box.empty() ? nullptr : box.data(), bw, bh), g);
 	tex->media = MediaOf(g);
 	return tex;
 }
@@ -299,6 +304,43 @@ Shots LoadShots(const GameInfo& g)
 	return shots;
 }
 
+} // namespace
+
+bool LoadMainScreenshot(const GameInfo& g, std::vector<uint32_t>& px, int& w, int& h)
+{
+	const std::string covers = OrbisDir("covers");
+	std::vector<std::string> files = {covers + "/shots/" + g.file_base + ".png"};
+	std::string title;
+	for (const WantedCover& wc : ScreensFor(g))
+	{
+		const bool is_title = wc.file.size() > 10 && wc.file.compare(wc.file.size() - 10, 10, ".title.png") == 0;
+		if (is_title)
+			title = covers + "/" + wc.file;
+		else
+			files.push_back(covers + "/" + wc.file);
+	}
+	if (!title.empty())
+		files.push_back(title);
+	for (const std::string& f : files)
+	{
+		std::vector<uint8_t> file;
+		if (!ReadFile(f, file))
+			continue;
+		int comp = 0;
+		stbi_uc* img = stbi_load_from_memory(file.data(), int(file.size()), &w, &h, &comp, 4);
+		if (!img)
+			continue;
+		px.assign(reinterpret_cast<uint32_t*>(img), reinterpret_cast<uint32_t*>(img) + size_t(w) * h);
+		stbi_image_free(img);
+		for (uint32_t& p : px)
+			p |= 0xff000000u;
+		return true;
+	}
+	return false;
+}
+
+namespace
+{
 std::shared_ptr<CoverTex> Placeholder(const GameInfo& g, const Shots* shots)
 {
 	const int w = 720, h = kCoverTexH;
@@ -374,7 +416,7 @@ std::shared_ptr<CoverTex> Placeholder(const GameInfo& g, const Shots* shots)
 	DrawTextOn(canvas, (w - TextWidth(sub.c_str(), 3)) / 2, h - 80, sub.c_str(), 3, Pack(170, 160, 210));
 	auto tex = MakeTex(px.data(), w, h);
 	tex->source = "placeholder";
-	tex->art = MakeArt(px.data(), w, h, g, shots);
+	tex->art = WithOwnBox(MakeArt(px.data(), w, h, g, shots), g);
 	tex->media = MediaOf(g);
 	return tex;
 }
@@ -394,6 +436,73 @@ namespace
 std::atomic<bool> g_shelf_downloads{true};
 
 #include "msx_thumbs.inc"
+
+// 2026-10-16: a box of its own (the Arabic collection's printed boxes): covers/boxes/<ROM name>.front / .back / .spine
+// (.png or .jpg) take the place of the box faces made from the cover. Each is scaled to the size of the made ones.
+void OwnBox(cart3d::Art& art, const fe::GameInfo& g)
+{
+	const std::string base = OrbisDir("covers") + "/boxes/" + g.file_base;
+	struct Part
+	{
+		const char* name;
+		cart3d::TexPtr* tex;
+		int w, h; // (0 w: the picture's own aspect at height h)
+	};
+	const Part parts[5] = {{"front", &art.front, 0, fe::kCoverTexH}, {"back", &art.back, 0, fe::kCoverTexH}, {"spine", &art.spine, 112, 768},
+		{"top", &art.top, 1024, 256}, {"rear", &art.rear, 896, 768}};
+	{
+		// its cartridge's shape ("tall": the Quran's)
+		std::vector<uint8_t> shape;
+		if (ReadFile(base + ".cart", shape) && std::string(shape.begin(), shape.end()).find("tall") != std::string::npos)
+			art.tall = true;
+	}
+	{
+		// its plastic's colour, "rrggbb" (sRGB): the black plastic's albedo scaled to it
+		std::vector<uint8_t> file;
+		unsigned c = 0;
+		if (ReadFile(base + ".plastic", file) && !file.empty())
+		{
+			file.push_back(0);
+			if (std::sscanf(reinterpret_cast<const char*>(file.data()), "%6x", &c) == 1)
+			{
+				for (int i = 0; i < 3; i++)
+				{
+					const float s = float((c >> (16 - 8 * i)) & 0xff) / 255.0f;
+					const float lin = s <= 0.04045f ? s / 12.92f : std::pow((s + 0.055f) / 1.055f, 2.4f);
+					art.tint[i] = lin / 0.008f;
+				}
+				art.tinted = true;
+			}
+		}
+	}
+	for (const Part& p : parts)
+	{
+		std::vector<uint8_t> file;
+		if (!ReadFile(base + "." + p.name + ".png", file) && !ReadFile(base + "." + p.name + ".jpg", file))
+			continue;
+		int w = 0, h = 0, comp = 0;
+		stbi_uc* img = stbi_load_from_memory(file.data(), int(file.size()), &w, &h, &comp, 4);
+		if (!img)
+			continue;
+		const int th = p.h, tw = p.w ? p.w : (int(std::lround(th * std::clamp(float(w) / float(h), 0.3f, 1.6f))) & ~3);
+		std::vector<uint32_t> px(size_t(tw) * th);
+		stbir_resize_uint8_srgb(img, w, h, 0, reinterpret_cast<unsigned char*>(px.data()), tw, th, 0, STBIR_RGBA);
+		stbi_image_free(img);
+		for (uint32_t& q : px)
+			q |= 0xff000000u;
+		*p.tex = cart3d::Texture::FromPixels(px.data(), tw, th);
+		if (p.tex == &art.spine)
+			art.clamshell = true; // (a printed box of its own: Al Alamiah's black plastic clamshell)
+	}
+}
+std::shared_ptr<const cart3d::Art> WithOwnBox(std::shared_ptr<const cart3d::Art> made, const fe::GameInfo& g)
+{
+	if (!made)
+		return made;
+	std::shared_ptr<cart3d::Art> art = std::const_pointer_cast<cart3d::Art>(made); // (made non-const by MakeArt)
+	OwnBox(*art, g);
+	return art;
+}
 
 // "Pay Load (Japan) (Alt 1)" -> "payload": the title without its (tags) and [tags], letters and digits, lower case.
 std::string TitleKey(const std::string& name)

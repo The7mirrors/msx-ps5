@@ -21,7 +21,11 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#if !defined(__ANDROID__)
 #include <sys/sysctl.h>
+#else
+#include <stdlib.h> // arc4random_buf
+#endif
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -63,6 +67,11 @@ Tls& T()
 
 int Entropy(void*, unsigned char* out, size_t len, size_t* olen)
 {
+#if defined(__ANDROID__)
+	arc4random_buf(out, len); // (bionic: the kernel's random source)
+	*olen = len;
+	return 0;
+#else
 	size_t done = 0;
 	while (done < len)
 	{
@@ -74,6 +83,7 @@ int Entropy(void*, unsigned char* out, size_t len, size_t* olen)
 	}
 	*olen = len;
 	return 0;
+#endif
 }
 
 bool TlsInit()

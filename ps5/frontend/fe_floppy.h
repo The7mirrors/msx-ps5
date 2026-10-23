@@ -23,6 +23,22 @@ int fe_floppy_list(char devs[][32], long long sizes[], int max);
 // name the image (the same disk gets the same name, and so the same save file).
 int fe_floppy_read(const char* dev, const char* out_path, unsigned long long* hash);
 
+// MSX PS5 (2026-10-15): a floppy formatted on a PC (FAT12, or FAT16) holding game files: "drop the ROMs on the floppy".
+// Only the disk's start (boot sector, FAT, folders) is read to list them; a file is read when its game starts.
+typedef struct
+{
+	char name[200];    // its path on the disk ("Knightmare (Japan).rom", "MSX/Zanac.zip"): long names when it has them
+	unsigned cluster;  // its first cluster
+	unsigned size;     // bytes
+} fe_floppy_file;
+
+// The files on the disk in `dev` (folders three deep). Returns how many (at most `max`), 0 when it isn't a FAT disk
+// (an MSX disk of its own, or blank), -1 when it can't be read.
+int fe_floppy_files(const char* dev, fe_floppy_file* out, int max);
+
+// One of those files, copied to `out_path`. Returns 0, or -1 (the disk can't be read, or the file isn't whole).
+int fe_floppy_extract(const char* dev, unsigned cluster, unsigned size, const char* out_path);
+
 #ifdef __cplusplus
 }
 #endif

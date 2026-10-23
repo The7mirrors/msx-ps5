@@ -420,7 +420,25 @@ std::string Search(System s, System* found_in, F&& find)
 
 bool IsFloppyDevice(const std::string& path)
 {
-	return path.rfind("/dev/da", 0) == 0;
+	return path.rfind("/dev/da", 0) == 0 && path.find('|') == std::string::npos;
+}
+
+bool IsFloppyFile(const std::string& path)
+{
+	return path.rfind("/dev/da", 0) == 0 && path.find('|') != std::string::npos;
+}
+
+bool ParseFloppyFile(const std::string& path, std::string* dev, unsigned* cluster, unsigned* size, std::string* name)
+{
+	const size_t a = path.find('|'), b = a == std::string::npos ? a : path.find('|', a + 1),
+				 c = b == std::string::npos ? b : path.find('|', b + 1);
+	if (c == std::string::npos)
+		return false;
+	*dev = path.substr(0, a);
+	*cluster = unsigned(strtoul(path.c_str() + a + 1, nullptr, 10));
+	*size = unsigned(strtoul(path.c_str() + b + 1, nullptr, 10));
+	*name = path.substr(c + 1);
+	return *cluster >= 2 && *size > 0 && !name->empty();
 }
 
 const SystemInfo& Info(System s)
@@ -702,6 +720,69 @@ std::vector<GameInfo> ScanGames()
 	const int nflop = fe_floppy_list(devs, sizes, FE_FLOPPY_MAX);
 	for (int i = 0; i < nflop; i++)
 	{
+		// a floppy formatted on a PC with games dropped on it: each game file on the shelf (only the disk's start is
+		// read now; a game's file when it starts)
+		static fe_floppy_file files[128];
+		const int nf = fe_floppy_files(devs[i], files, 128);
+		int listed = 0;
+		for (int f = 0; f < nf; f++)
+		{
+			const std::string on_disk = files[f].name;
+			const std::string name = on_disk.substr(on_disk.find_last_of('/') + 1);
+			const std::string ext = ExtOf(name);
+			GameInfo fg;
+			if (ext == ".zip")
+				fg.system = System::Msx; // (what's inside is looked at when it starts)
+			else if (ext.empty() || !SystemForExt(ext, &fg.system))
+				continue;
+			fg.path = std::string(devs[i]) + "|" + std::to_string(files[f].cluster) + "|" + std::to_string(files[f].size) + "|" + on_disk;
+			fg.file_base = name.substr(0, name.size() - ext.size());
+			fg.ext = ext;
+			fg.on_usb = true;
+			System found = fg.system;
+			fg.nointro = gamedb::Loose(fg.system, fg.file_base, &found);
+			if (!fg.nointro.empty())
+				fg.system = found;
+			else if (fg.file_base.find(" (") != std::string::npos)
+				fg.nointro = fg.file_base;
+			if (fg.nointro.empty())
+			{
+				// MSX PS5 1.2 (2026-10-22; user: Square found no cover for "Penguin Adventure.rom" on a floppy): the same game
+				// in the library ("Penguin Adventure (Japan, Europe).zip") gives its full name, and so its cover; else the name
+				// alone, which the cover list (msx_thumbs.inc) is searched by
+				auto bare = [](const std::string& n) {
+					std::string out;
+					int depth = 0;
+					for (char c : n)
+					{
+						if (c == '(' || c == '[')
+							depth++;
+						else if ((c == ')' || c == ']') && depth > 0)
+							depth--;
+						else if (depth == 0 && isalnum(uint8_t(c)))
+							out += char(tolower(uint8_t(c)));
+					}
+					return out;
+				};
+				const std::string want = bare(fg.file_base);
+				for (const GameInfo& lg : games)
+					if (!IsFloppyFile(lg.path) && !IsFloppyDevice(lg.path) && !lg.nointro.empty() && bare(lg.nointro) == want)
+					{
+						fg.nointro = lg.nointro;
+						fg.system = lg.system;
+						break;
+					}
+				if (fg.nointro.empty())
+					fg.nointro = fg.file_base;
+			}
+			fg.title = fg.nointro.empty() ? fg.file_base : gamedb::Title(fg.nointro);
+			fg.region = gamedb::Region(fg.nointro);
+			OrbisLog("[games] floppy %s: %s (%u bytes) -> \"%s\"", devs[i], on_disk.c_str(), files[f].size, fg.title.c_str());
+			games.push_back(std::move(fg));
+			listed++;
+		}
+		if (listed > 0 && sizes[i] >= 1400000)
+			continue; // (a 1.44 MB PC disk: its games, not the disk itself; an MSX disk, 720 KB, stays one too)
 		GameInfo g;
 		g.path = devs[i];
 		g.file_base = std::string("Floppy disk (") + (devs[i] + 5) + ")";
@@ -715,7 +796,7 @@ std::vector<GameInfo> ScanGames()
 	}
 
 	std::sort(games.begin(), games.end(), [](const GameInfo& a, const GameInfo& b) {
-		const bool fa = IsFloppyDevice(a.path), fb = IsFloppyDevice(b.path);
+		const bool fa = IsFloppyDevice(a.path) || IsFloppyFile(a.path), fb = IsFloppyDevice(b.path) || IsFloppyFile(b.path);
 		if (fa != fb)
 			return fa;
 		const int c = strcasecmp(a.title.c_str(), b.title.c_str());
@@ -748,12 +829,16 @@ std::vector<GameInfo> OneOfEach(const std::vector<GameInfo>& games)
 	auto key = [&](const GameInfo& g) {
 		const std::string& e = g.ext;
 		const char media = (e == ".dsk" || e == ".di1" || e == ".di2" || e == ".fdi") ? 'd' : e == ".cas" ? 't' : 'c';
-		return std::to_string(int(g.system)) + media + lower(gamedb::Title(g.nointro.empty() ? g.file_base : g.nointro));
+		std::string k = std::to_string(int(g.system)) + media + lower(gamedb::Title(g.nointro.empty() ? g.file_base : g.nointro));
+		const std::string fb = lower(g.file_base);
+		if (fb.find("(al alamiah") != std::string::npos || fb.find("(barq") != std::string::npos || fb.find("(al-mithali") != std::string::npos)
+			k += "|arabic"; // (Sakhr's Arabic editions are games of their own next to the Japanese / European ones)
+		return k;
 	};
 	auto score = [&](const GameInfo& g) {
 		const std::string n = lower(g.nointro.empty() ? g.file_base : g.nointro);
 		auto has = [&](const char* t) { return n.find(t) != std::string::npos; };
-		int s = 0;
+		int s = IsFloppyFile(g.path) ? -100 : 0;
 		if (has("(alt"))
 			s += 10;
 		for (const char* bad : {"(beta", "(proto", "(demo", "(sample", "(hack", " hack)", "(pirate", "(bad", "high speed", "[b]"})

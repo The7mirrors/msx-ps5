@@ -4,6 +4,7 @@
 #include "fe_cart3d.h"
 
 #include "msx_logo.inc"
+#include "alamiah_logo.inc"
 
 #include <algorithm>
 #include <cmath>
@@ -190,13 +191,289 @@ Mesh CartridgeMesh()
 	return m;
 }
 
+// Al Alamiah's mark as a height (0..1, the mark 1 on its tile), softened so its edges slope; At(u, v) 0..1 each
+struct AlamiahEmboss
+{
+	static constexpr int N = 56, S = 4; // (sampled 4x finer, blurred)
+	std::vector<float> h;
+	AlamiahEmboss() : h(size_t(N * S) * (N * S), 0.0f)
+	{
+		const int M = N * S;
+		std::vector<float> a(size_t(M) * M);
+		for (int y = 0; y < M; y++)
+			for (int x = 0; x < M; x++)
+			{
+				const char c = kAlamiahLogo[y / S][x / S];
+				a[size_t(y) * M + x] = c == '2' ? 1.0f : 0.0f; // (the tile is the raised panel itself)
+			}
+		// two box blurs (radius 3): soft slopes
+		for (int pass = 0; pass < 2; pass++)
+		{
+			std::vector<float> b(a.size());
+			for (int y = 0; y < M; y++)
+				for (int x = 0; x < M; x++)
+				{
+					float s2 = 0;
+					int n = 0;
+					for (int dx = -3; dx <= 3; dx++)
+						if (x + dx >= 0 && x + dx < M)
+							s2 += a[size_t(y) * M + x + dx], n++;
+					b[size_t(y) * M + x] = s2 / n;
+				}
+			for (int y = 0; y < M; y++)
+				for (int x = 0; x < M; x++)
+				{
+					float s2 = 0;
+					int n = 0;
+					for (int dy = -3; dy <= 3; dy++)
+						if (y + dy >= 0 && y + dy < M)
+							s2 += b[size_t(y + dy) * M + x], n++;
+					a[size_t(y) * M + x] = s2 / n;
+				}
+		}
+		h = a;
+	}
+	float At(float u, float v) const
+	{
+		const int M = N * S;
+		const float fx = std::clamp(u, 0.0f, 1.0f) * (M - 1), fy = std::clamp(v, 0.0f, 1.0f) * (M - 1);
+		const int x0 = int(fx), y0 = int(fy), x1 = std::min(x0 + 1, M - 1), y1 = std::min(y0 + 1, M - 1);
+		const float tx = fx - x0, ty = fy - y0;
+		const float a0 = h[size_t(y0) * M + x0] * (1 - tx) + h[size_t(y0) * M + x1] * tx;
+		const float a1 = h[size_t(y1) * M + x0] * (1 - tx) + h[size_t(y1) * M + x1] * tx;
+		return a0 * (1 - ty) + a1 * ty;
+	}
+};
+const AlamiahEmboss& AlamiahLogo()
+{
+	static const AlamiahEmboss e;
+	return e;
+}
+
+// Al Alamiah's cartridge: its front outline (rounded top corners, nearly square bottom ones) pushed back into a body
+// with rounded edges, the same size as the Konami cartridge (the shelf's spacing and sprites stay as they are), and the
+// same connector opening underneath.
+Mesh AlamiahMesh()
+{
+	Mesh m;
+	const float w = 1.52f, d = 0.24f, hx = w / 2, hd = d / 2;
+	const float rt = 0.13f, rb = 0.022f, e = 0.03f; // top corners, bottom corners, the edge's rounding
+	m.w = w, m.h = 1, m.d = d;
+	struct OP
+	{
+		float x, y, nx, ny;
+		uint8_t face;
+	};
+	std::vector<OP> ol; // anticlockwise seen from the front... (x right, y up), each with its outward normal
+	auto arc = [&](float cx, float cy, float r, float a0, float a1, int n, uint8_t face) {
+		for (int i = 0; i <= n; i++)
+		{
+			const float a = a0 + (a1 - a0) * float(i) / n;
+			ol.push_back({cx + r * std::cos(a), cy + r * std::sin(a), std::cos(a), std::sin(a), face});
+		}
+	};
+	const float pi = 3.14159265f;
+	// the bottom, left to right (the connector opening's ends as points of their own)
+	arc(-hx + rb, rb, rb, pi, 1.5f * pi, 4, FLeft);
+	ol.push_back({kOpenX0, 0, 0, -1, FBottom});
+	ol.push_back({kOpenX1, 0, 0, -1, FBottom});
+	arc(hx - rb, rb, rb, 1.5f * pi, 2 * pi, 4, FRight);
+	arc(hx - rt, 1 - rt, rt, 0, 0.5f * pi, 12, FTop);
+	arc(-hx + rt, 1 - rt, rt, 0.5f * pi, pi, 12, FTop);
+	const int n = int(ol.size());
+	// rings round the outline: the front's rounded edge (4 steps), the back's (4 steps); ring 0 lies in the front face
+	constexpr int kSteps = 4;
+	std::vector<float> ring_z, ring_c, ring_s; // z, and the normal's front (cos) / outward (sin) parts
+	for (int k = 0; k <= kSteps; k++)
+	{
+		const float a = 0.5f * pi * float(k) / kSteps;
+		ring_z.push_back(-hd + e - e * std::cos(a)), ring_c.push_back(std::cos(a)), ring_s.push_back(std::sin(a));
+	}
+	for (int k = kSteps; k >= 0; k--)
+	{
+		const float a = 0.5f * pi * float(k) / kSteps;
+		ring_z.push_back(hd - e + e * std::cos(a)), ring_c.push_back(-std::cos(a)), ring_s.push_back(std::sin(a));
+	}
+	const int nr = int(ring_z.size());
+	auto tri = [&](uint16_t a, uint16_t b, uint16_t c, uint8_t face, V3 out) {
+		const V3 &A = m.v[a].p, &B = m.v[b].p, &Cc = m.v[c].p;
+		if (Dot(Cross(Cc - A, B - A), out) >= 0)
+			m.t.push_back({a, b, c, face});
+		else
+			m.t.push_back({a, c, b, face});
+	};
+	const uint16_t base = uint16_t(m.v.size());
+	for (int r = 0; r < nr; r++)
+		for (const OP& o : ol)
+		{
+			const float out = e * (ring_s[size_t(r)] - 1); // inset at the faces, flush on the sides
+			Vert vt;
+			vt.p = {o.x + o.nx * out, o.y + o.ny * out, ring_z[size_t(r)]};
+			vt.n = Norm(V3{o.nx * ring_s[size_t(r)], o.ny * ring_s[size_t(r)], -ring_c[size_t(r)]});
+			vt.u = vt.v = 0;
+			m.v.push_back(vt);
+		}
+	auto at = [&](int r, int i) { return uint16_t(base + r * n + (i % n)); };
+	for (int r = 0; r + 1 < nr; r++)
+		for (int i = 0; i < n; i++)
+		{
+			const OP& o = ol[size_t(i)];
+			const OP& o2 = ol[size_t((i + 1) % n)];
+			// the wall band between the two edges' roundings: the bottom's middle (the opening) is left out
+			const bool wall = r == kSteps;
+			if (wall && o.face == FBottom && o2.face == FBottom)
+				continue; // (filled round the opening below)
+			uint8_t face = r < kSteps ? FFront : r >= kSteps + 1 ? FBack : o.face;
+			if (wall)
+				face = (o.face == FBottom || o2.face == FBottom) ? FBottom : o.face;
+			const V3 nrm = Norm(m.v[at(r, i)].n + m.v[at(r + 1, i + 1)].n);
+			tri(at(r, i), at(r + 1, i), at(r + 1, i + 1), face, nrm);
+			tri(at(r, i), at(r + 1, i + 1), at(r, i + 1), face, nrm);
+		}
+	// the front and the back: fans from their middles (the outline is convex)
+	for (int side = 0; side < 2; side++)
+	{
+		const int r = side == 0 ? 0 : nr - 1;
+		Vert c;
+		c.p = {0, 0.5f, side == 0 ? -hd : hd};
+		c.n = {0, 0, side == 0 ? -1.0f : 1.0f};
+		c.u = c.v = 0;
+		const uint16_t ci = uint16_t(m.v.size());
+		m.v.push_back(c);
+		for (int i = 0; i < n; i++)
+			tri(ci, at(r, i), at(r, i + 1), side == 0 ? FFront : FBack, c.n);
+	}
+	// round the opening: the bottom's two strips beside it, its walls and ceiling, the board (as the Konami one)
+	const V3 down{0, -1, 0};
+	const float z0 = -hd + e, z1 = hd - e;
+	AddQuad(m, {kOpenX0, 0, z0}, {kOpenX1, 0, z0}, {kOpenX1, 0, -kOpenZ}, {kOpenX0, 0, -kOpenZ}, down, FBottom);
+	AddQuad(m, {kOpenX0, 0, kOpenZ}, {kOpenX1, 0, kOpenZ}, {kOpenX1, 0, z1}, {kOpenX0, 0, z1}, down, FBottom);
+	const float dd = kOpenDepth;
+	AddQuad(m, {kOpenX0, 0, -kOpenZ}, {kOpenX1, 0, -kOpenZ}, {kOpenX1, dd, -kOpenZ}, {kOpenX0, dd, -kOpenZ}, {0, 0, 1}, FCavity);
+	AddQuad(m, {kOpenX0, 0, kOpenZ}, {kOpenX1, 0, kOpenZ}, {kOpenX1, dd, kOpenZ}, {kOpenX0, dd, kOpenZ}, {0, 0, -1}, FCavity);
+	AddQuad(m, {kOpenX0, 0, -kOpenZ}, {kOpenX0, 0, kOpenZ}, {kOpenX0, dd, kOpenZ}, {kOpenX0, dd, -kOpenZ}, {1, 0, 0}, FCavity);
+	AddQuad(m, {kOpenX1, 0, -kOpenZ}, {kOpenX1, 0, kOpenZ}, {kOpenX1, dd, kOpenZ}, {kOpenX1, dd, -kOpenZ}, {-1, 0, 0}, FCavity);
+	AddQuad(m, {kOpenX0, dd, -kOpenZ}, {kOpenX1, dd, -kOpenZ}, {kOpenX1, dd, kOpenZ}, {kOpenX0, dd, kOpenZ}, down, FCavity);
+	const float bx0 = kBoardX0, bx1 = kBoardX1, bz0 = kBoardZ0, bz1 = kBoardZ1, by0 = kBoardY0;
+	AddQuad(m, {bx0, by0, bz0}, {bx1, by0, bz0}, {bx1, by0, bz1}, {bx0, by0, bz1}, down, FBoard);
+	AddQuad(m, {bx0, by0, bz0}, {bx1, by0, bz0}, {bx1, dd, bz0}, {bx0, dd, bz0}, {0, 0, -1}, FBoard);
+	AddQuad(m, {bx0, by0, bz1}, {bx1, by0, bz1}, {bx1, dd, bz1}, {bx0, dd, bz1}, {0, 0, 1}, FBoard);
+	AddQuad(m, {bx0, by0, bz0}, {bx0, by0, bz1}, {bx0, dd, bz1}, {bx0, dd, bz0}, {-1, 0, 0}, FBoard);
+	AddQuad(m, {bx1, by0, bz0}, {bx1, by0, bz1}, {bx1, dd, bz1}, {bx1, dd, bz0}, {1, 0, 0}, FBoard);
+	return m;
+}
+
+// The Holy Quran's cartridge (the user's photo): 1.17:1, a body as deep as the others and on it a deeper head (the label
+// on its front), their backs flush - the head stands out at the front, a sloping step under it; the top corners rounded,
+// the left one more. Heights over the other cartridges'.
+constexpr float kTallH = 1.30f, kTallSplit = 0.74f, kTallD = 0.29f, kTallBodyD = 0.21f;
+
+// One part of it: an outline (x right, y up; rounded corners: bottom rb, top left rtl, top right rtr) pushed back from
+// z0 to z1 with rounded edges (e); the front and back filled from their middles (the outline is convex).
+void Extrude(Mesh& m, float w, float y0, float y1, float z0, float z1, float rb, float rtl, float rtr, float e)
+{
+	const float hx = w / 2, pi = 3.14159265f;
+	struct OP
+	{
+		float x, y, nx, ny;
+		uint8_t face;
+	};
+	std::vector<OP> ol;
+	auto arc = [&](float cx, float cy, float r, float a0, float a1, int n, uint8_t face) {
+		for (int i = 0; i <= n; i++)
+		{
+			const float a = a0 + (a1 - a0) * float(i) / n;
+			ol.push_back({cx + r * std::cos(a), cy + r * std::sin(a), std::cos(a), std::sin(a), face});
+		}
+	};
+	arc(-hx + rb, y0 + rb, rb, pi, 1.5f * pi, 4, FBottom);
+	arc(hx - rb, y0 + rb, rb, 1.5f * pi, 2 * pi, 4, FBottom);
+	arc(hx - rtr, y1 - rtr, rtr, 0, 0.5f * pi, 10, FTop);
+	arc(-hx + rtl, y1 - rtl, rtl, 0.5f * pi, pi, 10, FTop);
+	const int n = int(ol.size());
+	constexpr int kSteps = 3;
+	std::vector<float> rz, rc, rs;
+	for (int k = 0; k <= kSteps; k++)
+	{
+		const float a = 0.5f * pi * float(k) / kSteps;
+		rz.push_back(z0 + e - e * std::cos(a)), rc.push_back(std::cos(a)), rs.push_back(std::sin(a));
+	}
+	for (int k = kSteps; k >= 0; k--)
+	{
+		const float a = 0.5f * pi * float(k) / kSteps;
+		rz.push_back(z1 - e + e * std::cos(a)), rc.push_back(-std::cos(a)), rs.push_back(std::sin(a));
+	}
+	const int nr = int(rz.size());
+	auto tri = [&](uint16_t a, uint16_t b, uint16_t c, uint8_t face, V3 out) {
+		const V3 &A = m.v[a].p, &B = m.v[b].p, &Cc = m.v[c].p;
+		if (Dot(Cross(Cc - A, B - A), out) >= 0)
+			m.t.push_back({a, b, c, face});
+		else
+			m.t.push_back({a, c, b, face});
+	};
+	const uint16_t base = uint16_t(m.v.size());
+	for (int r = 0; r < nr; r++)
+		for (const OP& o : ol)
+		{
+			const float out = e * (rs[size_t(r)] - 1);
+			Vert vt;
+			vt.p = {o.x + o.nx * out, o.y + o.ny * out, rz[size_t(r)]};
+			vt.n = Norm(V3{o.nx * rs[size_t(r)], o.ny * rs[size_t(r)], -rc[size_t(r)]});
+			vt.u = vt.v = 0;
+			m.v.push_back(vt);
+		}
+	auto at = [&](int r, int i) { return uint16_t(base + r * n + (i % n)); };
+	for (int r = 0; r + 1 < nr; r++)
+		for (int i = 0; i < n; i++)
+		{
+			const OP& o = ol[size_t(i)];
+			const OP& o2 = ol[size_t((i + 1) % n)];
+			uint8_t face = r < kSteps ? FFront : r >= kSteps + 1 ? FBack : o.face;
+			if (r == kSteps)
+			{
+				// the sides: the ends between the top's and the bottom's arcs
+				const bool vert = std::fabs(o.nx) > 0.7f && std::fabs(o2.nx) > 0.7f;
+				face = vert ? (o.x < 0 ? FLeft : FRight) : (o.face == FTop || o2.face == FTop) && o.y > y0 + rb && o2.y > y0 + rb ? FTop : FBottom;
+				if (o.face != o2.face && std::fabs(o.nx) > 0.7f)
+					face = o.x < 0 ? FLeft : FRight;
+			}
+			const V3 nrm = Norm(m.v[at(r, i)].n + m.v[at(r + 1, i + 1)].n);
+			tri(at(r, i), at(r + 1, i), at(r + 1, i + 1), face, nrm);
+			tri(at(r, i), at(r + 1, i + 1), at(r, i + 1), face, nrm);
+		}
+	for (int side = 0; side < 2; side++)
+	{
+		const int r = side == 0 ? 0 : nr - 1;
+		Vert c;
+		c.p = {0, (y0 + y1) / 2, side == 0 ? z0 : z1};
+		c.n = {0, 0, side == 0 ? -1.0f : 1.0f};
+		c.u = c.v = 0;
+		const uint16_t ci = uint16_t(m.v.size());
+		m.v.push_back(c);
+		for (int i = 0; i < n; i++)
+			tri(ci, at(r, i), at(r, i + 1), side == 0 ? FFront : FBack, c.n);
+	}
+}
+
+Mesh TallMesh()
+{
+	Mesh m;
+	m.w = 1.52f, m.h = kTallH, m.d = kTallD;
+	const float hd = kTallD / 2;
+	// the body (its top hidden in the head), then the head with the step under its front
+	Extrude(m, m.w, 0, kTallSplit + 0.03f, hd - kTallBodyD, hd, 0.02f, 0.02f, 0.02f, 0.025f);
+	Extrude(m, m.w, kTallSplit, kTallH, -hd, hd, 0.035f, 0.13f, 0.085f, 0.035f);
+	return m;
+}
+
 const Mesh& MeshFor(Kind k)
 {
 	static const Mesh box = RoundedBox(0.72f, 0.17f, 0.012f, 3);
 	static const Mesh cart = CartridgeMesh(); // a Konami MSX cartridge: 112 x 73 x 17 mm, its connector open
 	static const Mesh floppy = RoundedBox(0.97f, 0.036f, 0.016f, 3);
 	static const Mesh wide = RoundedBox(1.36f, 0.27f, 0.014f, 3); // (deeper: a landscape box seen from the front)
-	return k == Kind::Box ? box : k == Kind::BoxWide ? wide : k == Kind::Cartridge ? cart : floppy;
+	static const Mesh half = RoundedBox(0.72f, 0.085f, 0.01f, 3);  // a clamshell's half
+	return k == Kind::Box ? box : k == Kind::BoxWide ? wide : k == Kind::Cartridge ? cart : k == Kind::BoxHalf ? half : floppy;
 }
 
 // ---- the back's raised logo: a height map (0..1), drawn once ----
@@ -446,17 +723,115 @@ struct Shader
 	const Art* art;
 	int lod_front = 0, lod_spine = 0, lod_back = 0, lod_label = 0, lod_disk = 0;
 	float shutter = 0; // a floppy's shutter, slid open
-	float mw = 1, md = 1; // the mesh's width and depth (height 1)
+	float mw = 1, md = 1, mh = 1; // the mesh's width, depth and height (over the cartridges' height)
 
 	// colour of a point: its face, object position and normal; world normal; view direction
 	bool simple = false; // the reflection: no shine
 	V3 operator()(uint8_t face, V3 op, V3 wn_geo, const Xform& x, V3 view, V3 on) const
 	{
 		Material m{{0.006f, 0.006f, 0.007f}, 0.6f, 6, 0.03f, 0.55f}; // glossy black plastic
+		// (a coloured plastic of its own: the black's albedo scaled)
+		auto plastic = [&](Material& mm) {
+			if (art && art->tinted)
+				mm.albedo = V3{mm.albedo.x * art->tint[0], mm.albedo.y * art->tint[1], mm.albedo.z * art->tint[2]};
+		};
+		plastic(m);
 		V3 emit{0, 0, 0}; // light of its own (the contacts, seen from below the studio lights)
 		V3 n = wn_geo;
 		const float hx = mw / 2;
-		if (kind == Kind::Box || kind == Kind::BoxWide)
+		if ((kind == Kind::BoxHalf) && face == FFront && art->half)
+		{
+			// a clamshell's inside, facing us when it is open (u across, v down the face)
+			const float u = (op.x + hx) / mw, v = 1 - op.y;
+			auto inside = [](float a, float lo, float hi, float soft) { // 1 inside [lo, hi], soft edges
+				return std::clamp(std::min(a - lo, hi - a) / soft + 0.5f, 0.0f, 1.0f);
+			};
+			auto rect = [&](float uu, float vv, float u0, float v0, float u1, float v1, float soft) {
+				return inside(uu, u0, u1, soft / 0.72f) * inside(vv, v0, v1, soft);
+			};
+			m = {{0.009f, 0.009f, 0.010f}, 0.42f, 6, 0.03f, 0.45f}; // the case's black plastic
+			plastic(m);
+			if (art->half == 3)
+			{
+				// a normal box's insert: a raised rim, one big recess the cartridge lies in (a finger notch at its top
+				// edge), a raised plate low down (the maker's name is moulded there); 0 the rim's top, below it deeper
+				auto ins = [&](float uu, float vv) {
+					float hh = -0.35f * rect(uu, vv, 0.055f, 0.035f, 0.945f, 0.965f, 0.008f);   // inside the rim
+					hh -= 0.75f * rect(uu, vv, 0.12f, 0.10f, 0.88f, 0.80f, 0.008f);            // the recess
+					const float d = std::sqrt((uu - 0.5f) * (uu - 0.5f) * 0.5184f + (vv - 0.10f) * (vv - 0.10f));
+					hh -= 0.6f * std::clamp((0.06f - d) / 0.008f + 0.5f, 0.0f, 1.0f);           // the finger notch
+					hh += 0.25f * rect(uu, vv, 0.30f, 0.85f, 0.70f, 0.92f, 0.005f);            // the plate
+					return hh;
+				};
+				const float e = 0.004f;
+				const float hh = ins(u, v);
+				const float gu = (ins(u + e, v) - ins(u - e, v)) / (2 * e), gv = (ins(u, v + e) - ins(u, v - e)) / (2 * e);
+				n = x.Rotate(Norm(V3{-gu * 0.035f, gv * 0.035f, -1}));
+				const float depth = std::clamp(-hh / 1.3f, 0.0f, 1.0f);
+				m.albedo = m.albedo * (1.0f - 0.55f * depth);
+				m.env *= 1.0f - 0.6f * depth;
+				m.ks *= 1.0f - 0.4f * depth;
+			}
+			else if (art->half == 1)
+			{
+				// the lid: its moulded tray (the user's photo) - a rim all round, a deep pocket at the top with a bar across
+				// it, a thumb notch at each side twice, the cartridge's well at the foot; 0 the rim's top, below it deeper
+				auto tray = [&](float uu, float vv) {
+					if (art->tall)
+					{
+						// the Quran's: a rim, the floor, a raised block across the top half, the cartridge's well below it
+						float hq = -0.5f * rect(uu, vv, 0.05f, 0.03f, 0.95f, 0.97f, 0.008f);
+						hq += 0.55f * rect(uu, vv, 0.17f, 0.08f, 0.83f, 0.46f, 0.008f);
+						hq -= 0.5f * rect(uu, vv, 0.11f, 0.52f, 0.89f, 0.94f, 0.006f);
+						return hq;
+					}
+					float hh = -0.5f * rect(uu, vv, 0.06f, 0.035f, 0.94f, 0.965f, 0.008f);  // the floor inside the rim
+					hh -= 0.6f * rect(uu, vv, 0.14f, 0.075f, 0.86f, 0.47f, 0.008f);         // the deep pocket
+					hh += 0.5f * rect(uu, vv, 0.17f, 0.15f, 0.83f, 0.205f, 0.006f);         // the bar across it
+					hh -= 0.45f * rect(uu, vv, 0.11f, 0.545f, 0.89f, 0.935f, 0.006f);       // the cartridge's well
+					for (float cy : {0.40f, 0.745f})
+						for (float cx : {0.075f, 0.925f})
+						{
+							const float d = std::sqrt((uu - cx) * (uu - cx) * 0.5184f + (vv - cy) * (vv - cy));
+							hh -= 0.5f * std::clamp((0.045f - d) / 0.008f + 0.5f, 0.0f, 1.0f); // a thumb notch
+						}
+					return hh;
+				};
+				const float e = 0.004f;
+				const float hh = tray(u, v);
+				const float gu = (tray(u + e, v) - tray(u - e, v)) / (2 * e), gv = (tray(u, v + e) - tray(u, v - e)) / (2 * e);
+				// the slopes tilt the normal (u along +x, v down = -y); deeper is darker (the walls shade the floors)
+				n = x.Rotate(Norm(V3{-gu * 0.035f, gv * 0.035f, -1}));
+				const float depth = std::clamp(-hh / 1.6f, 0.0f, 1.0f);
+				m.albedo = m.albedo * (1.0f - 0.55f * depth);
+				m.env *= 1.0f - 0.6f * depth;
+				m.ks *= 1.0f - 0.4f * depth;
+			}
+			else
+			{
+				// the back half: the manual (a booklet with the box's art) held under the clear sleeve, a black frame round it
+				// (the Quran's: its printed cover nearly to the edges, no sleeve)
+				const float bx = art->tall ? 0.035f : 0.075f, by = art->tall ? 0.025f : 0.05f;
+				const float b = rect(u, v, bx, by, 1 - bx, 1 - by, art->tall ? 0.003f : 0.004f);
+				if (b > 0.01f && art->front)
+				{
+					const float bu = (u - bx) / (1 - 2 * bx), bv = (v - by) / (1 - 2 * by);
+					const V3 paper = Sample(art->front.get(), bu, bv, lod_front);
+					m.albedo = m.albedo * (1 - b) + paper * b;
+					if (art->tall)
+						m.ks = 0.08f, m.env = 0.012f, m.sheen = 0.12f;
+					else
+						m.ks = 0.16f, m.env = 0.025f, m.sheen = 0.22f; // under the sleeve: a clear gloss
+				}
+				else
+				{
+					// the frame: the booklet's shadow just outside it
+					const float sh = rect(u, v, 0.06f, 0.035f, 0.94f, 0.965f, 0.01f);
+					m.albedo = m.albedo * (1 - 0.5f * sh);
+				}
+			}
+		}
+		else if (kind == Kind::Box || kind == Kind::BoxWide || kind == Kind::BoxHalf)
 		{
 			// printed card with a gloss coat
 			m = {{0.2f, 0.2f, 0.2f}, 0.12f, 6, 0.02f, 0.38f}; // printed card with a gloss coat
@@ -468,12 +843,39 @@ struct Shader
 				case FLeft:
 				case FRight:
 				{
+					if (art->clamshell && (face == FRight || art->half == 1 || art->half == 3))
+					{
+						// the side it opens from: bare black plastic, the two halves meeting in a seam down the middle,
+						// each half's edge rounded into a low ridge beside it
+						m = {{0.008f, 0.008f, 0.009f}, 0.5f, 6, 0.03f, 0.5f};
+						plastic(m);
+						const float zc = op.z / (md / 2); // -1 .. 1 across the side
+						const V3 fa{0, 0, 1}, fn{1, 0, 0};
+						if (std::fabs(zc) < 0.07f)
+						{
+							m.albedo = m.albedo * 0.3f; // the gap between the halves
+							m.env *= 0.2f, m.ks *= 0.3f;
+						}
+						else
+						{
+							const float r = std::fabs(zc) - 0.07f; // from the gap out
+							if (r < 0.35f)
+								n = x.Rotate(Norm(fn + fa * ((zc > 0 ? -1.0f : 1.0f) * 0.9f * (1 - r / 0.35f)))); // the ridges' rounded edges
+						}
+						break;
+					}
 					const float s = (op.z + md / 2) / md;
 					m.albedo = Sample(art->spine.get(), face == FLeft ? 1 - s : s, v, lod_spine);
 					break;
 				}
 				default:
 				{
+					if (art->clamshell)
+					{
+						m = {{0.008f, 0.008f, 0.009f}, 0.5f, 6, 0.03f, 0.5f}; // the clamshell's black plastic
+						plastic(m);
+						break;
+					}
 					const Texture* t = art->front.get();
 					m.albedo = t ? Unpack(t->average) * 0.8f : V3{0.05f, 0.05f, 0.05f};
 					break;
@@ -483,10 +885,39 @@ struct Shader
 		else if (kind == Kind::Cartridge)
 		{
 			// glossy black plastic; the front: a plain strip on the left (two round holes, a seam), the label to its right
-			const bool konami = art->konami;
+			const bool konami = art->konami && !art->alamiah;
+			const bool alamiah = art->alamiah;
 			const float strip = konami ? -hx + 0.31f : -hx;
-			const float lx0 = konami ? strip : -hx + 0.07f, lx1 = konami ? hx - 0.035f : hx - 0.07f;
-			const float ly0 = konami ? 0.055f : 0.09f, ly1 = konami ? 0.985f : 0.90f;
+			float lx0 = konami ? strip : -hx + 0.07f, lx1 = konami ? hx - 0.035f : hx - 0.07f;
+			float ly0 = konami ? 0.055f : 0.09f, ly1 = konami ? 0.985f : 0.90f;
+			if (alamiah)
+			{
+				// the label across the top two thirds, clear of the holes on the left
+				lx0 = -hx + 0.205f, lx1 = hx - 0.205f, ly0 = 0.37f, ly1 = 0.985f;
+				// matte grained plastic: dull, and its grain scattering the light
+				m = {{0.0062f, 0.0062f, 0.007f}, 0.12f, 3, 0.009f, 0.13f};
+				const float gx = Hash2(std::floor(op.x * 900), std::floor(op.y * 900 + op.z * 900)) - 0.5f;
+				const float gy = Hash2(std::floor(op.y * 900 + 7), std::floor(op.x * 900 + op.z * 900 + 3)) - 0.5f;
+				const float gz = Hash2(std::floor(op.z * 900 + 11), std::floor(op.x * 900 + op.y * 900 + 5)) - 0.5f;
+				n = Norm(n + V3{gx, gy, gz} * 0.16f);
+			}
+			if (art->tall)
+			{
+				// the Quran's: the label on the head, plastic either side (more on the right); matte grained plastic
+				lx0 = -hx + 0.13f, lx1 = hx - 0.22f, ly0 = kTallSplit + 0.045f, ly1 = kTallH - 0.035f;
+				m = {{0.0062f, 0.0062f, 0.007f}, 0.12f, 3, 0.009f, 0.13f};
+				plastic(m);
+				const float gx = Hash2(std::floor(op.x * 900), std::floor(op.y * 900 + op.z * 900)) - 0.5f;
+				const float gy = Hash2(std::floor(op.y * 900 + 7), std::floor(op.x * 900 + op.z * 900 + 3)) - 0.5f;
+				n = Norm(n + V3{gx, gy, 0} * 0.12f);
+			}
+			else if (art->own_label)
+			{
+				// an Arabic cartridge's label: up to the top edge, nearly edge to edge; Al Alamiah's ends higher
+				lx0 = -hx + 0.05f, lx1 = hx - 0.05f, ly1 = 0.985f;
+				if (art->alamiah_soft)
+					ly0 = 0.28f;
+			}
 			// the view direction in object space (into the surface)
 			const V3 vo = Norm({-(x.m[0][0] * view.x + x.m[1][0] * view.y + x.m[2][0] * view.z),
 				-(x.m[0][1] * view.x + x.m[1][1] * view.y + x.m[2][1] * view.z), -(x.m[0][2] * view.x + x.m[1][2] * view.y + x.m[2][2] * view.z)});
@@ -551,7 +982,12 @@ struct Shader
 			};
 			if (face == FFront)
 			{
-				if (op.x > lx0 && op.x < lx1 && op.y > ly0 && op.y < ly1)
+				// (the Al Alamiah label's corners are rounded)
+				const float lr = alamiah ? 0.022f : 0.0f;
+				const float cxr = op.x < lx0 + lr ? lx0 + lr - op.x : op.x > lx1 - lr ? op.x - (lx1 - lr) : 0.0f;
+				const float cyr = op.y < ly0 + lr ? ly0 + lr - op.y : op.y > ly1 - lr ? op.y - (ly1 - lr) : 0.0f;
+				const bool in_corner = lr > 0 && cxr * cxr + cyr * cyr > lr * lr;
+				if (op.x > lx0 && op.x < lx1 && op.y > ly0 && op.y < ly1 && !in_corner)
 				{
 					m = {Sample(art->label.get(), (op.x - lx0) / (lx1 - lx0), 1 - (op.y - ly0) / (ly1 - ly0), lod_label), 0.2f, 7, 0.02f,
 						0.3f};
@@ -559,6 +995,85 @@ struct Shader
 					const float e = std::min({op.x - lx0, lx1 - op.x, op.y - ly0, ly1 - op.y});
 					if (e < 0.006f)
 						m.albedo = m.albedo * (0.6f + 0.4f * e / 0.006f);
+				}
+				else if (alamiah || (art->tall && op.y < kTallSplit))
+				{
+					const V3 fa{1, 0, 0}, fb{0, 1, 0}, fn{0, 0, 1};
+					// the two holes down the left, right through the body (the Quran's: one, low)
+					if (art->tall ? !hole(-hx + 0.10f, 0.29f, 0.042f, md * 0.6f, op.x, op.y, vo.x, vo.y, vo.z, fa, fb, fn)
+								  : (!hole(-hx + 0.118f, 0.915f, 0.046f, md * 0.9f, op.x, op.y, vo.x, vo.y, vo.z, fa, fb, fn) &&
+									 !hole(-hx + 0.118f, 0.255f, 0.046f, md * 0.9f, op.x, op.y, vo.x, vo.y, vo.z, fa, fb, fn)))
+					{
+						// the raised panel at the bottom right: the logo, then grip ribs to the end
+						const float px0 = hx - 0.29f, px1 = hx - 0.012f, py0 = 0.125f, py1 = 0.285f;
+						if (op.x > px0 && op.x < px1 && op.y > py0 && op.y < py1)
+						{
+							const float ex = std::min(op.x - px0, px1 - op.x), ey = std::min(op.y - py0, py1 - op.y);
+							const float edge = std::min(ex, ey);
+							if (edge < 0.006f)
+							{
+								// its edge: a little wall catching the light
+								const bool side = ex < ey;
+								n = x.Rotate(Norm(V3{0, 0, -1} + (side ? fa * (op.x - px0 < px1 - op.x ? -1.2f : 1.2f)
+																	  : fb * (op.y - py0 < py1 - op.y ? -1.2f : 1.2f))));
+							}
+							else
+							{
+								m.albedo = V3{0.011f, 0.011f, 0.012f};
+								m.ks = 0.22f, m.env = 0.02f;
+								plastic(m);
+								// the logo: Al Alamiah's mark, raised (traced from the label): its slopes tilt the normal
+								const float lw = 0.13f, lu = (op.x - (px0 + 0.02f)) / lw, lv = 1 - (op.y - (py0 + 0.012f)) / (py1 - py0 - 0.024f);
+								const bool on_logo = lu > 0 && lu < 1 && lv > 0 && lv < 1;
+								float hgt = 0;
+								if (on_logo)
+								{
+									const AlamiahEmboss& e = AlamiahLogo();
+									const float du = 1.0f / 224, dv = 1.0f / 224;
+									hgt = e.At(lu, lv);
+									const float gx = e.At(lu + du, lv) - e.At(lu - du, lv), gy = e.At(lu, lv + dv) - e.At(lu, lv - dv);
+									n = x.Rotate(Norm(V3{0, 0, -1} + fa * (-gx * 9.0f) + fb * (gy * 9.0f)));
+									if (hgt > 0.8f)
+									{
+										m.albedo = V3{0.016f, 0.016f, 0.018f}; // the mark's top: smoother, a touch brighter
+										m.ks = 0.3f, m.env = 0.04f;
+										plastic(m);
+									}
+								}
+								// the logo's stripes: across its right half (through the mark's small lobes) and on to the panel's end
+								if (op.x > px0 + 0.02f + lw * 0.55f)
+									groove(std::fmod(op.y - py0, 0.0123f) - 0.00615f, 0.0029f, fb, V3{0, 0, -1}); // the ribs
+							}
+						}
+						else
+							groove(op.y - 0.095f, 0.004f, fb, V3{0, 0, -1}); // the step along the bottom
+					}
+				}
+				else if (art->alamiah_soft && op.y < ly0)
+				{
+					// Al Alamiah's software cartridge: a round hole low on the left, a recessed panel low on the right
+					const V3 fa{1, 0, 0}, fb{0, 1, 0}, fn{0, 0, 1};
+					if (!hole(-hx + 0.11f, 0.14f, 0.042f, md * 0.6f, op.x, op.y, vo.x, vo.y, vo.z, fa, fb, fn))
+					{
+						const float rx0 = hx - 0.47f, rx1 = hx - 0.10f, ry0 = 0.05f, ry1 = 0.235f;
+						if (!art->tall && op.x > rx0 && op.x < rx1 && op.y > ry0 && op.y < ry1)
+						{
+							const float ex = std::min(op.x - rx0, rx1 - op.x), ey = std::min(op.y - ry0, ry1 - op.y);
+							if (std::min(ex, ey) < 0.007f)
+							{
+								// its walls, sloping in
+								const bool side = ex < ey;
+								n = x.Rotate(Norm(V3{0, 0, -1} + (side ? fa * (op.x - rx0 < rx1 - op.x ? 1.1f : -1.1f)
+																	  : fb * (op.y - ry0 < ry1 - op.y ? 1.1f : -1.1f))));
+								m.albedo = m.albedo * 0.7f;
+							}
+							else
+							{
+								m.albedo = m.albedo * 0.55f; // its floor, in shadow
+								m.env *= 0.5f;
+							}
+						}
+					}
 				}
 				else if (konami && op.x < lx0)
 				{
@@ -578,7 +1093,7 @@ struct Shader
 				(void)fn;
 				// the right end: a round boss, slightly raised (its edge catches the light, a soft shadow around it)
 				bool on_boss = false;
-				if (face == FRight && konami)
+				if (face == FRight && konami && !alamiah)
 				{
 					const float bx = op.z - 0.0f, by = op.y - 0.80f, d = std::sqrt(bx * bx + by * by), r = 0.042f;
 					if (d < r * 0.82f)
@@ -597,11 +1112,21 @@ struct Shader
 					}
 				}
 				// one crease down the middle of the end
-				if (!on_boss && op.y > 0.04f && op.y < 0.97f)
+				if (!on_boss && !art->tall && op.y > 0.04f && op.y < 0.97f)
 					groove(op.z, 0.0085f, fa, V3{sgn, 0, 0});
 			}
 			else if (face == FTop)
-				groove(op.z, 0.0035f, V3{0, 0, 1}, V3{0, 1, 0}); // the halves' seam along the top
+			{
+				if (art->top) // printed (seen from the front: the picture's foot along the front edge)
+					m = {Sample(art->top.get(), (op.x + hx) / mw, (md / 2 - op.z) / md, lod_label), 0.25f, 7, 0.03f, 0.3f};
+				else
+					groove(op.z, 0.0035f, V3{0, 0, 1}, V3{0, 1, 0}); // the halves' seam along the top
+			}
+			else if (face == FBack && art->rear)
+			{
+				// its own picture (seen from behind: u runs right to left), matte
+				m = {Sample(art->rear.get(), (hx - op.x) / mw, 1 - op.y / mh, lod_label), 0.12f, 3, 0.009f, 0.13f};
+			}
 			else if (face == FBack)
 			{
 				// brushed plastic: streaks along its length, some catching the light like scratches
@@ -611,6 +1136,7 @@ struct Shader
 				const float broken = 0.75f + 0.25f * Hash2(std::floor(op.x * 9 + row * 37), std::floor(row * 1400));
 				const float k = st * broken;
 				m = {V3{0.030f, 0.031f, 0.034f} * (0.55f + 0.9f * k), 0.25f + 0.5f * k * k, 4, 0.10f * k, 0.30f + 0.5f * k * k};
+				plastic(m);
 				// seen from behind: u runs right to left
 				const float u = (hx - op.x) / mw, vv = 1 - op.y;
 				const V3 fa{-1, 0, 0}, fb{0, 1, 0}, fn{0, 0, -1}; // the back's axes; into the body
@@ -618,7 +1144,7 @@ struct Shader
 				{
 					// the raised logo, over the middle: its slope tilts the normal
 					const float lu0 = 0.20f, lu1 = 0.80f, lv0 = 0.30f, lv1 = 0.96f; // the logo sits a little above the middle
-					if (u > lu0 && u < lu1 && vv > lv0 && vv < lv1)
+					if (!art->tall && u > lu0 && u < lu1 && vv > lv0 && vv < lv1)
 					{
 						const Emboss& e = Logo();
 						const float eu = (u - lu0) / (lu1 - lu0), ev = (vv - lv0) / (lv1 - lv0);
@@ -635,7 +1161,7 @@ struct Shader
 					}
 				}
 			}
-			else if (face == FBottom)
+			else if (face == FBottom && !art->tall)
 			{
 				// the screw post's hole in the wide block, beside the opening
 				const float cx = (-hx + kOpenX0) / 2;
@@ -879,7 +1405,7 @@ bool RawBounds(const View& v, const Mesh& mesh, const Pose& p, int m0, int m1, f
 		const Xform x = Place(p, mirror != 0);
 		for (int i = 0; i < 8; i++)
 		{
-			const V3 c{(i & 1 ? 0.5f : -0.5f) * mesh.w, i & 2 ? (mirror ? kMirrorTop : 1.0f) : 0.0f, (i & 4 ? 0.5f : -0.5f) * mesh.d};
+			const V3 c{(i & 1 ? 0.5f : -0.5f) * mesh.w, i & 2 ? (mirror ? kMirrorTop : mesh.h) : 0.0f, (i & 4 ? 0.5f : -0.5f) * mesh.d};
 			const V3 w = x.Apply(c);
 			if (w.z < 10)
 				return false;
@@ -933,17 +1459,32 @@ void Shadow(const Target& tg, const View& v, const Mesh& mesh, const Pose& p, in
 	}
 }
 
+// The mesh for this game's object: Al Alamiah's and the Quran's cartridges have their own
+const Mesh& MeshOf(Kind k, const Art* art)
+{
+	static const Mesh alamiah = AlamiahMesh();
+	static const Mesh tall = TallMesh();
+	if (k == Kind::Cartridge && art)
+	{
+		if (art->tall)
+			return tall;
+		if (art->alamiah)
+			return alamiah;
+	}
+	return MeshFor(k);
+}
+
 // Columns [x0, x1) of one object into a target: its shadow, its reflection (in its own box), its body.
 void DrawTo(const Target& tg, const View& v, Kind k, const Pose& p, const Art& art, int x0, int x1)
 {
 	x0 = std::max(x0, tg.ox), x1 = std::min(x1, tg.ox + tg.tw);
 	if (x0 >= x1)
 		return;
-	const Mesh& mesh = MeshFor(k);
+	const Mesh& mesh = MeshOf(k, &art);
 	Shader sh;
 	sh.kind = k;
 	sh.art = &art;
-	sh.mw = mesh.w, sh.md = mesh.d;
+	sh.mw = mesh.w, sh.md = mesh.d, sh.mh = mesh.h;
 	// texture levels from the object's size on screen
 	const float screen_h = v.focal * p.height / std::max(p.z, 10.0f);
 	sh.lod_front = Lod(art.front.get(), screen_h);
@@ -1031,9 +1572,9 @@ void Draw(uint32_t* surf, const View& v, Kind k, const Pose& p, const Art& art, 
 	DrawTo(tg, v, k, p, art, x0, x1);
 }
 
-bool Prepare(Sprite& s, const View& v, Kind k, const Pose& p)
+bool Prepare(Sprite& s, const View& v, Kind k, const Pose& p, const Art* art)
 {
-	const Mesh& mesh = MeshFor(k);
+	const Mesh& mesh = MeshOf(k, art);
 	float lx, ly, hx, hy;
 	s.w = s.h = 0;
 	if (!RawBounds(v, mesh, p, 0, p.reflection ? 1 : 0, lx, ly, hx, hy))

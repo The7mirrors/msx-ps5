@@ -3,7 +3,8 @@
 <h1 align="center">MSX PS5</h1>
 
 <p align="center"><b>An MSX emulator for the PS5, with a 3D game shelf.</b><br>
-blueMSX at its heart; boxes, cartridges and floppies you can turn in your hands.</p>
+blueMSX at its heart; boxes, cartridges and floppies you can turn in your hands.<br>
+Plug in a <b>real USB floppy drive</b> and your disks play like on the real thing.</p>
 
 <p align="center"><img src="docs/screenshots/shelf-boxes.jpg" width="860" alt="The game shelf with boxes"></p>
 
@@ -25,6 +26,12 @@ blueMSX at its heart; boxes, cartridges and floppies you can turn in your hands.
 **MSX PS5** runs MSX, MSX2 and MSX2+ games on a jailbroken PS5 as a home-screen app, through the
 [blueMSX](http://www.bluemsx.com/) emulator (its [libretro core](https://github.com/libretro/blueMSX-libretro)).
 
+- **Real floppy disks (USB floppy drive)** - plug a USB floppy drive into the PS5 and put a disk in: the game on
+  it **starts by itself**, no menu needed. Even from the home screen: the small `floppywatch` payload opens MSX PS5
+  when a game disk goes in. Disks formatted on a PC work too - drop `.rom`, `.dsk`, `.cas` or `.zip` files on a
+  1.44 MB floppy and each one appears on the **Floppy drive** shelf, drawn as a floppy and with its cover from your
+  collection. MSX disks of their own (720 KB) are read whole. **Square** copies the disk's game into your
+  collection, and asks before it overwrites a copy you already have. Nothing is ever written to the floppy.
 - **A 3D shelf** - every game stands on a glossy shelf as its **box**, its **cartridge** or its **floppy disk**
   (L3 switches the style). Boxes get a spine and a back made from the cover art, with the publisher, year and
   screenshots.
@@ -35,6 +42,9 @@ blueMSX at its heart; boxes, cartridges and floppies you can turn in your hands.
 - **Box art by itself** - covers, box backs and screenshots are downloaded from
   [libretro-thumbnails](https://github.com/libretro-thumbnails) (Square fetches one again).
 - **Favorites** - Circle marks a game; the Favorites tab keeps them together.
+- **The Arabic MSX collection** - games and programs from Al Alamiah, Barq and Al-Mithali get a **Sakhr** shelf of
+  their own, with their own cartridges, opening clamshell boxes and the Arabic MSX2 machine.
+- **Themes** - Cover glow, Sakhr blue, MSX classic, Synthwave and Al Alamiah backdrops behind the shelf.
 - **Music and sounds** - ten original shelf tunes (ambient, chill, hip-hop, jazz and more) and CC0 sound effects,
   each with its own volume.
 - **Playing** - CRT shaders and scanlines, screen size and aspect, save states, rewind (hold L2 + R2), fast
@@ -46,11 +56,13 @@ blueMSX at its heart; boxes, cartridges and floppies you can turn in your hands.
   Tested on firmware **13.00**.
 - **ShadowMountPlus** (or another homebrew registrar) so the installed app gets its home-screen tile.
 - Your own MSX games (none are included); an internet connection on the PS5 for the box art.
+- Optional: a **USB floppy drive** for real disks (tested with a TEAC USB floppy drive). Plug it straight into the
+  PS5, not through a hub; if it has two USB plugs, connect both.
 
 ## Install
 
-1. Download **`MSXPS5-v1.0.zip`** from the [Releases](../../releases) page and unzip it. Inside are
-   **`MSXPS5.elf`** (the app) and a **`bios`** folder.
+1. Download the latest **`MSXPS5-v*.zip`** from the [Releases](../../releases) page and unzip it. Inside are
+   **`MSXPS5.elf`** (the app), **`floppywatch.elf`** (the floppy watcher, optional) and a **`bios`** folder.
 2. Send `MSXPS5.elf` with your payload loader. It installs the app to `/data/homebrew/PPSA99231` and stays running
    as the app's helper.
 3. Open **MSX PS5** once from the home screen (if the tile doesn't appear, let ShadowMountPlus rescan or restart the
@@ -109,17 +121,30 @@ Box art, box backs and screenshots are **downloaded by themselves** from
   (for example `/data/msx/covers/Knightmare.png` for `Knightmare.rom`), or next to the game file.
   Your own art always wins over a download.
 
+### 4. Floppy disks
+
+- **A PC-formatted floppy** (1.44 MB, FAT): copy game files onto it on your computer - `.rom`, `.mx1`, `.mx2`,
+  `.dsk`, `.cas` or `.zip`, folders are fine. Naming a file like the game in your collection (for example
+  `Penguin Adventure.rom`) gives it that game's cover.
+- **An MSX disk** (720 KB, made on an MSX) is read whole, as a disk image.
+- Disks sold as **"2HD Mac"** come formatted for a Macintosh: format them on a PC first (File Explorer: right-click
+  the floppy > Format > FAT).
+- **Starting from the home screen:** send `floppywatch.elf` with your payload loader, and add it to the loader's
+  autoload list so it runs after every restart. When a disk with a game goes in, it opens MSX PS5 (not over another
+  game or app that is open: you get a notification instead). Inside MSX PS5 the game starts by itself either way.
+- The game starts once per disk: quit it and you get the shelf; take the disk out and put it back to start it again.
+
 ## Controls
 
 | On the shelf | |
 | --- | --- |
 | Cross | play |
 | D-pad left / right | browse (L1 / R1: ten at a time) |
-| D-pad up / down | choose the system / Favorites |
+| D-pad up / down | choose the system / Favorites / Floppy drive |
 | L2 / R2 | turn the game |
 | L3 | boxes / cartridges / floppies |
 | Triangle | settings |
-| Square | download the cover again |
+| Square | download the cover again (on the Floppy drive shelf: add the disk's game to your collection) |
 | Circle | favorite |
 | Touchpad | cartridge: swipe up to see its contacts (then blow); floppy: swipe to slide the shutter |
 | Options | quit |
@@ -142,6 +167,8 @@ states (`/data/msx/states`) are kept.
 - **A disk or tape game asks for the MSX BIOS** - see [BIOS](#1-bios-do-this-first): those need the real BIOS ROMs.
 - **No covers** - check the PS5's internet connection and Settings > LIBRARY > Download covers; a few games simply
   have no art in libretro-thumbnails (add your own).
+- **The floppy isn't seen** - plug the drive straight into the PS5 (no hub) with both plugs if it has two; a disk
+  formatted for a Mac must be formatted on a PC first; an old disk may simply be worn out.
 - **The tile isn't on the home screen** - let ShadowMountPlus rescan, or restart the PS5 and send the payload again.
 - **Something else** - the app writes its log to `/data/msx/logs/boot.log`; please attach it to an
   [issue](../../issues).
@@ -155,6 +182,8 @@ clang/lld 18:
 cd ps5
 make ps5 PS5_PAYLOAD_SDK=/path/to/ps5-payload-sdk
 # -> build/ps5/MSXPS5.elf
+PS5_PAYLOAD_SDK=/path/to/ps5-payload-sdk bash tools/floppywatch/build.sh
+# -> tools/floppywatch/floppywatch.elf
 ```
 
 | Part | Where | What it is |
@@ -163,6 +192,7 @@ make ps5 PS5_PAYLOAD_SDK=/path/to/ps5-payload-sdk
 | The app | `ps5/frontend/` | the shelf (`fe_shelf`, `fe_cart3d`, `fe_art`), menus, covers, sound and music |
 | PS5 layer | `ps5/coreorbis/` | video, pad, microphone, audio, paths, crash log |
 | Installer / helper | `ps5/installer/`, `ProsperoHelper.cpp` | installs the app and gives it access to `/data` |
+| Floppy drives | `ps5/frontend/fe_floppy.c`, `ps5/tools/floppywatch/` | reads USB floppies (raw MSX disks, PC FAT12/16 disks); the watcher payload |
 
 The upstream core's own documentation is in [README-blueMSX-libretro.md](README-blueMSX-libretro.md).
 

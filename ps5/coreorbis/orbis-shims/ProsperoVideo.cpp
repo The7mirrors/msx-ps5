@@ -14,12 +14,17 @@
 // SPDX-License-Identifier: MIT
 
 #include "ProsperoVideo.h"
+#if defined(MSX_ANDROID)
+#include "msx_android.h"
+#endif
 
 #include "OrbisPaths.h"
 #include "ProsperoCrt.h"
 #include "ProsperoSce.h"
 
+#if !defined(MSX_ANDROID)
 #include <immintrin.h>
+#endif
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -113,6 +118,7 @@ struct State
 };
 State g;
 
+#if !defined(MSX_ANDROID)
 __attribute__((target("avx2"))) void TileArea(const uint32_t* src, uint32_t pitch, uint32_t* dst, uint32_t x0,
 	uint32_t x1, uint32_t y0, uint32_t y1)
 {
@@ -335,8 +341,42 @@ void SetOutputSize(int w, int h)
 	}
 	g.full[0] = g.full[1] = true;
 }
+#endif // !MSX_ANDROID
 } // namespace
 
+#if defined(MSX_ANDROID)
+// Android: the surface goes to the app's window (msx_android.h); posting a window buffer waits for the display.
+bool Init()
+{
+	if (g.ok)
+		return true;
+	g.surface = static_cast<uint32_t*>(aligned_alloc(64, size_t(kWidth) * kHeight * 4));
+	if (!g.surface)
+		return false;
+	std::fill(g.surface, g.surface + size_t(kWidth) * kHeight, Rgb(0, 0, 0));
+	g.ok = true;
+	Present(0, 0, 0, 0, true);
+	return true;
+}
+
+void Shutdown()
+{
+	free(g.surface);
+	g.surface = nullptr;
+	g.ok = false;
+}
+
+uint32_t* Surface()
+{
+	return g.surface;
+}
+
+void Present(int x, int y, int w, int h, bool wait_vsync)
+{
+	if (g.ok)
+		msx_android_present(g.surface, kWidth, kHeight, x, y, w, h, wait_vsync);
+}
+#else
 bool Init()
 {
 	if (g.ok)
@@ -465,6 +505,8 @@ void Present(int x, int y, int w, int h, bool wait_vsync)
 	if (wait_vsync)
 		WaitOneFlip();
 }
+
+#endif // MSX_ANDROID
 
 void FillRect(int x, int y, int w, int h, uint32_t color)
 {

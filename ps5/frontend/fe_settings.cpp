@@ -120,6 +120,8 @@ void Settings::Load()
 			debug_logs = n != 0;
 		else if (key == "shelf_family")
 			shelf_family = Clamp(n, 0, 64);
+		else if (key == "shelf_theme")
+			shelf_theme = Clamp(n, 0, 4);
 		else if (key == "shelf_style")
 			shelf_style = Clamp(n, 0, 2);
 		else if (key == "one_version")
@@ -246,6 +248,7 @@ void Settings::Save() const
 	fprintf(f, "debug_logs=%d\n", debug_logs ? 1 : 0);
 	fprintf(f, "shelf_family=%d\n", shelf_family);
 	fprintf(f, "shelf_style=%d\n", shelf_style);
+	fprintf(f, "shelf_theme=%d\n", shelf_theme);
 	fprintf(f, "one_version=%d\n", one_version ? 1 : 0);
 	fprintf(f, "last_rom=%s\n", last_rom.c_str());
 	bool ok = ferror(f) == 0;

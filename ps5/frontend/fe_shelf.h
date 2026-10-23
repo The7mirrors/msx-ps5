@@ -16,7 +16,9 @@
 
 namespace fe
 {
-// Returns the game to play, or "" when the player quits.
+// Returns the game to play, or "" when the player quits, or kShelfRescan (MSX PS5 1.2): a floppy disk came or went while
+// the shelf was up, so the caller opens the shelf again (it scans the drives again, and starts a floppy's game).
+constexpr const char kShelfRescan[] = "\x01rescan";
 std::string Shelf();
 // Stops the cover downloads before the payload exits.
 void ShelfShutdown();

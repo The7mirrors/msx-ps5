@@ -25,7 +25,7 @@
 PS5_PAYLOAD_SDK ?= /opt/ps5-payload-sdk
 PS5_HOST ?= ps5
 PS5_PORT ?= 9021
-VERSION ?= 1.0
+VERSION ?= 1.2
 CORE_VERSION := 2.8.3
 TITLE_ID ?= PPSA99231
 APP_OUT := build/app/$(TITLE_ID)
@@ -342,6 +342,9 @@ $(HOST_OUT)/genplus-ps5-host: $(HOST_CORE_OBJ) $(HOST_EMU_OBJ) $(HOST_OUT)/helpe
 
 test: host
 	bash tests/run-tests.sh
+
+# (the Android build is not part of this repository)
+-include android/android.mk
 
 clean:
 	rm -rf build

@@ -41,6 +41,9 @@ enum class Family : uint8_t
 // MSX PS5 (2026-10-10, AI-assisted): a USB floppy drive's disk shows on the shelf as a game whose path is the
 // drive's device ("/dev/da3"); starting it reads the disk into a .dsk (fe_floppy.h) that the core loads.
 bool IsFloppyDevice(const std::string& path);
+// MSX PS5 (2026-10-15): a game file on a PC-formatted floppy: "/dev/da3|<cluster>|<size>|<path on the disk>"
+bool IsFloppyFile(const std::string& path);
+bool ParseFloppyFile(const std::string& path, std::string* dev, unsigned* cluster, unsigned* size, std::string* name);
 
 struct SystemInfo
 {

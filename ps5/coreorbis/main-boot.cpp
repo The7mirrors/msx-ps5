@@ -28,6 +28,9 @@
 #include "fe_prefetch.h"
 #include "fe_settings.h"
 #include "fe_shelf.h"
+#if defined(MSX_ANDROID)
+#include "msx_android.h"
+#endif
 
 #include <cstdio>
 #include <cstdlib>
@@ -213,9 +216,20 @@ int Run(int argc, char** argv)
 	{
 		if (rom.empty())
 			rom = fe::Shelf();
+		if (rom == fe::kShelfRescan) // MSX PS5 1.2: a floppy came or went: the shelf again
+		{
+			rom.clear();
+			continue;
+		}
 		if (rom.empty())
 			break; // OPTIONS on the shelf
+#if defined(MSX_ANDROID)
+		msx_android_set_game(true); // (the Thor: the game on the top screen, the shelf stays on the bottom one)
+#endif
 		const bool again = PlayGame(rom, from_command_line);
+#if defined(MSX_ANDROID)
+		msx_android_set_game(false);
+#endif
 		rom.clear();
 		if (!again)
 			break;

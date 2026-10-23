@@ -103,6 +103,10 @@ void Handler(int sig, siginfo_t* info, void* ctx)
 		rip = uintptr_t(uc->uc_mcontext.mc_rip);
 		rsp = uintptr_t(uc->uc_mcontext.mc_rsp);
 		rbp = uintptr_t(uc->uc_mcontext.mc_rbp);
+#elif defined(__aarch64__)
+		rip = uintptr_t(uc->uc_mcontext.pc); // (Android: pc, sp, the frame pointer x29)
+		rsp = uintptr_t(uc->uc_mcontext.sp);
+		rbp = uintptr_t(uc->uc_mcontext.regs[29]);
 #elif defined(__linux__)
 		rip = uintptr_t(uc->uc_mcontext.gregs[REG_RIP]);
 		rsp = uintptr_t(uc->uc_mcontext.gregs[REG_RSP]);

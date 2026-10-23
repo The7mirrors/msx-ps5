@@ -78,6 +78,9 @@ void TurnCover(const GameInfo& g);
 // ("MSX/<name>.snap.png", "MSX/<name>.title.png": the helper takes only "<folder>/<name>.png") and its addresses
 // (tab-separated). The title screen first.
 std::vector<WantedCover> ScreensFor(const GameInfo& g);
+// The game's main screenshot from the cover folder (an in-game picture, else the title screen; covers/shots/<name>.png
+// first - the Arabic games' own), A8B8G8R8; false: none.
+bool LoadMainScreenshot(const GameInfo& g, std::vector<uint32_t>& px, int& w, int& h);
 
 // The shelf's own downloads. Off on the console, as PS5SX2's shelf (download_usb_only): there every cover
 // comes from the prefetch, before the app asks for /data (main-boot.cpp). On by default for the host.

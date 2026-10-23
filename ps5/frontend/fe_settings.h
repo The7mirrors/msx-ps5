@@ -55,6 +55,7 @@ struct Settings
 	bool covers_download = true; // fetch box art from libretro-thumbnails
 	bool debug_logs = true;      // boot.log and the others in /data/msx/logs (OrbisLogSetEnabled)
 	int shelf_family = 0; // fe::Family the shelf shows
+	int shelf_theme = 0;  // the shelf's look: 0 cover glow, 1 Sakhr blue, 2 MSX classic, 3 synthwave, 4 Al Alamiah
 	int shelf_style = 0;  // the games on the shelf: 0 their boxes, 1 their cartridges / floppies, 2 all floppies
 	bool one_version = true; // the shelf shows one version of each game (fe::OneOfEach)
 	std::string last_rom; // the shelf puts the selection on this game

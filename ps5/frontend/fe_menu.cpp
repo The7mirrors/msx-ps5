@@ -207,6 +207,11 @@ const char* OnOff(bool b)
 // ---- settings ----------------------------------------------------------------------------------------
 enum SettingRow
 {
+	H_LIBRARY,
+	S_SHELF,
+	S_THEME,
+	S_VERSIONS,
+	S_COVERS,
 	H_VIDEO,
 	S_SHADER,
 	S_SCALE,
@@ -233,10 +238,6 @@ enum SettingRow
 	S_BTN_FIRST,
 	S_BTN_LAST = S_BTN_FIRST + emu::kConsoleButtonCount - 1,
 	S_BTN_DEFAULT,
-	H_LIBRARY,
-	S_SHELF,
-	S_VERSIONS,
-	S_COVERS,
 	H_SYSTEM,
 	S_DEBUGLOGS,
 	H_ABOUT,
@@ -306,6 +307,11 @@ Row SettingRowFor(int s)
 			return {"Default button layout", ""};
 		case H_LIBRARY: return {"LIBRARY", "", true, true};
 		case S_SHELF: return {"Games on the shelf", c.shelf_style == 2 ? "Floppies" : c.shelf_style == 1 ? "Cartridges" : "Boxes"};
+		case S_THEME:
+		{
+			static const char* const kThemes[] = {"Cover glow", "Sakhr blue", "MSX classic", "Synthwave", "Al Alamiah"};
+			return {"Theme", kThemes[std::max(0, std::min(4, c.shelf_theme))]};
+		}
 		case S_VERSIONS: return {"Versions of each game (Alt, regions)", c.one_version ? "The best one" : "All"};
 		case S_COVERS: return {"Download covers", OnOff(c.covers_download)};
 		case H_SYSTEM: return {"SYSTEM", "", true, true};
@@ -361,6 +367,7 @@ void ChangeSetting(int s, int dir)
 		case S_REGION: c.region = Cycle(c.region, dir, emu::kRegionCount); break;
 		case S_SPRITES: c.no_sprite_limit = !c.no_sprite_limit; break;
 		case S_SHELF: c.shelf_style = Cycle(c.shelf_style, dir, 3); break;
+		case S_THEME: c.shelf_theme = Cycle(c.shelf_theme, dir, 5); break;
 		case S_VERSIONS: c.one_version = !c.one_version; break;
 		case S_COVERS: c.covers_download = !c.covers_download; break;
 		case S_DEBUGLOGS:
@@ -419,7 +426,7 @@ void Background(bool over_game)
 void SettingsScreen(bool over_game)
 {
 	NavReader nav;
-	int sel = S_SHADER;
+	int sel = S_SHELF; // (the first setting: the library comes first)
 	for (;;)
 	{
 		const std::vector<Row> rows = SettingRows();

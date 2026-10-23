@@ -210,6 +210,30 @@ bool IsKonami(const GameInfo& g)
 	return false;
 }
 
+// 2026-10-16: the Arabic MSX cartridges (Sakhr's Al Alamiah, Barq, Al-Mithali) as named on the shelf: "<Title> (Al Alamiah)"
+bool IsArabicEdition(const GameInfo& g)
+{
+	std::string n = g.file_base;
+	for (char& c : n)
+		c = char(tolower(uint8_t(c)));
+	return n.find("(al alamiah") != std::string::npos || n.find("(barq") != std::string::npos ||
+		   n.find("(al-mithali") != std::string::npos;
+}
+
+// Al Alamiah's eight game cartridges (the blue grid / orange sun label): their own cartridge on the shelf
+bool IsAlamiah(const GameInfo& g)
+{
+	std::string n = g.file_base;
+	for (char& c : n)
+		c = char(tolower(uint8_t(c)));
+	if (n.find("(al alamiah") == std::string::npos)
+		return false;
+	for (const char* t : {"alpharoid", "boulder dash", "bomber man", "break in", "h.e.r.o.", "oil's well", "river raid", "snake it"})
+		if (n.rfind(t, 0) == 0)
+			return true;
+	return false;
+}
+
 cart3d::Kind MediaOf(const GameInfo& g)
 {
 	if (g.system == System::Disk)
@@ -363,6 +387,16 @@ std::shared_ptr<const cart3d::Art> MakeArt(const uint32_t* rgba, int w, int h, c
 	// the label
 	const bool konami = IsKonami(g);
 	art->konami = konami;
+	art->alamiah = IsAlamiah(g);
+	// an Arabic MSX cartridge with its own label scan (the publisher's logos and the MSX mark already on it)
+	const bool own_label = IsArabicEdition(g);
+	art->own_label = own_label && !art->alamiah;
+	{
+		std::string n = g.file_base;
+		for (char& c : n)
+			c = char(tolower(uint8_t(c)));
+		art->alamiah_soft = art->own_label && n.find("(al alamiah") != std::string::npos;
+	}
 	{
 		// a floppy's label (every game: the shelf of floppies): the art filling it, the badge
 		const int lw = 480, lh = 330;
@@ -373,6 +407,15 @@ std::shared_ptr<const cart3d::Art> MakeArt(const uint32_t* rgba, int w, int h, c
 	}
 	if (MediaOf(g) == cart3d::Kind::Floppy)
 		art->label = art->disk_label;
+	else if (own_label)
+	{
+		// the scanned / recreated label, whole (no badge over it)
+		// (the label's place on the cartridge: Al Alamiah's games 1.80:1, its software 2.0:1, Barq / Al-Mithali 1.6:1)
+		const int lw = 640, lh = art->alamiah ? 356 : art->alamiah_soft ? 320 : 400;
+		Img lb(lw, lh);
+		Stretch(lb, 0, 0, lw, lh, cov);
+		art->label = cart3d::Texture::FromPixels(lb.px.data(), lw, lh);
+	}
 	else if (konami)
 	{
 		// Konami's: the art in a coloured frame up to the top, an orange band, the badge in white

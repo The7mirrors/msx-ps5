@@ -35,4 +35,8 @@ std::shared_ptr<const cart3d::Art> MakeArt(const uint32_t* rgba, int w, int h, c
 cart3d::Kind MediaOf(const GameInfo& g);
 // A Konami game (by its title): Konami's cartridge and label.
 bool IsKonami(const GameInfo& g);
+// 2026-10-16: an Arabic MSX cartridge ("<Title> (Al Alamiah)", "(Barq)", "(Al-Mithali)"): its own label, an Arabic MSX
+bool IsArabicEdition(const GameInfo& g);
+// one of Al Alamiah's eight game cartridges: Al Alamiah's cartridge shape
+bool IsAlamiah(const GameInfo& g);
 } // namespace fe

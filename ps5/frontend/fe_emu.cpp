@@ -28,6 +28,9 @@
 #include "ProsperoVideo.h"
 
 #include "libretro.h"
+#if defined(MSX_ANDROID)
+#include "msx_android.h"
+#endif
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -509,6 +512,7 @@ unsigned HidToRetrok(uint16_t u)
 
 // MSX PS5 (2026-10-10): a USB keyboard's keys held and the USB mouse's movement this frame (ProsperoKbdMouse).
 bool g_usb_keys[RETROK_LAST];
+bool g_touch_keys[RETROK_LAST]; // MSX Android: the on-screen keyboard's keys held (the game panel)
 int g_mouse_dx, g_mouse_dy;
 uint32_t g_mouse_buttons;
 
@@ -610,7 +614,7 @@ bool KeyDown(unsigned retrok)
 int16_t InputState(unsigned port, unsigned device, unsigned index, unsigned id)
 {
 	if ((device & RETRO_DEVICE_MASK) == RETRO_DEVICE_KEYBOARD) // the pad's mapped keys, and a USB keyboard's
-		return port == 0 && (KeyDown(id) || (id < RETROK_LAST && g_usb_keys[id])) ? 1 : 0;
+		return port == 0 && (KeyDown(id) || (id < RETROK_LAST && (g_usb_keys[id] || g_touch_keys[id]))) ? 1 : 0;
 	if ((device & RETRO_DEVICE_MASK) == RETRO_DEVICE_MOUSE) // MSX PS5: a USB mouse (libretro.c: the MSX mouse)
 	{
 		if (port != 0)
@@ -828,7 +832,11 @@ ps5video::Rect DrawLast()
 	const fe::Settings& cfg = fe::Config();
 	const int base_h = g.fh > 300 ? g.fh / 2 : g.fh; // interlaced (double field) pictures: the 224-line grid
 	return ps5video::DrawFrame(g.frame.data(), g.fw, g.fh, base_h, FrameAspect(), ps5video::Scale(cfg.scale), cfg.smooth,
+#if defined(MSX_ANDROID)
+		cfg.scanlines, 0); // (the CRT shaders are too heavy for a phone's CPU: newpixie took ~20 ms a frame on the Thor)
+#else
 		cfg.scanlines, cfg.shader);
+#endif
 }
 
 void RewindPush()
@@ -914,7 +922,18 @@ void ApplySettings()
 		}
 	};
 	// the machine, the sync and the FM chip take effect when a game starts (the core's "(Restart)" options)
-	set("bluemsx_msxtype", kRegions[s.region % kRegionCount].value);
+	// 2026-10-16: Sakhr's Arabic cartridges ("<Title> (Al Alamiah)", "(Barq)", "(Al-Mithali)") need an Arabic MSX (its
+	// Arabic characters and BIOS): blueMSX's "MSX2 - Arabic"; every other game the machine in Settings
+	{
+		std::string nm = g.name;
+		for (char& c : nm)
+			c = char(tolower(uint8_t(c)));
+		const bool arabic = nm.find("(al alamiah") != std::string::npos || nm.find("(barq") != std::string::npos ||
+							nm.find("(al-mithali") != std::string::npos;
+		// Auto: an MSX1 game (the MSX collection) on an MSX - some only show a black screen on an MSX2 / MSX2+ (Boulder Dash)
+		const char* machine = (s.region % kRegionCount == 0 && g.system == fe::System::Msx) ? "MSX" : kRegions[s.region % kRegionCount].value;
+		set("bluemsx_msxtype", arabic ? "MSX2 - Arabic" : machine);
+	}
 	set("bluemsx_vdp_synctype", kNtscFilters[s.ntsc % kNtscFilterCount].value);
 	set("bluemsx_ym2413_enable", kFmChips[s.fm_chip % kFmChipCount].value);
 	set("bluemsx_overscan", kBorders[s.borders % kBorderCount].value);
@@ -927,8 +946,11 @@ void ApplySettings()
 		ApplyControllers();
 }
 
+int g_load_count = 0; // (each game started: the Android game panel shows itself again)
+
 bool LoadGame(const std::string& path, std::string* error)
 {
+	g_load_count++;
 	if (!g.inited)
 		return false;
 	GENPLUS_STAGE(Emu, "load game");
@@ -957,6 +979,30 @@ bool LoadGame(const std::string& path, std::string* error)
 	const std::string tmp = OrbisDir("tmp");
 	OrbisMkdirs(tmp);
 	std::string inner;
+	std::string src = path; // the file the zip branch below opens (a floppy's game: its copy in tmp/)
+	if (fe::IsFloppyFile(path))
+	{
+		// a game dropped on a PC-formatted floppy: its file copied off the disk, then on as usual
+		std::string dev, on_disk;
+		unsigned cluster = 0, size = 0;
+		const std::string name = path.substr(path.find_last_of("|/") + 1);
+		const std::string copy = tmp + "/" + name;
+		if (!fe::ParseFloppyFile(path, &dev, &cluster, &size, &on_disk) || fe_floppy_extract(dev.c_str(), cluster, size, copy.c_str()) != 0)
+		{
+			OrbisLog("[emu] could not read %s from the floppy disk", path.c_str());
+			if (error)
+				*error = "The game couldn't be read from the floppy disk. Check that the disk is still in the drive; if it is, "
+						 "the disk or the drive's heads may be worn or dirty.";
+			g.path.clear();
+			return false;
+		}
+		OrbisLog("[emu] floppy game %s copied to %s (%u bytes)", on_disk.c_str(), copy.c_str(), size);
+		ext = ExtOf(name);
+		g.name = name.substr(0, name.size() - ext.size());
+		g.dir = tmp;
+		g.load_path = copy;
+		src = copy;
+	}
 	if (fe::IsFloppyDevice(path))
 	{
 		unsigned long long hash = 0;
@@ -986,7 +1032,7 @@ bool LoadGame(const std::string& path, std::string* error)
 	}
 	else if (ext == ".zip")
 	{
-		if (!fe::ReadFromZip(path, &inner, &g.rom))
+		if (!fe::ReadFromZip(src, &inner, &g.rom))
 		{
 			OrbisLog("[emu] could not start %s: no game inside the zip", path.c_str());
 			if (error)
@@ -1187,11 +1233,337 @@ void RedrawLastFrame()
 	DrawLast();
 }
 
+#if defined(MSX_ANDROID)
+// ---- the game panel (a dual-screen handheld's bottom screen while the game plays) ------------------------------
+namespace
+{
+struct PanelButton
+{
+	int x, y, w, h;
+	int id;
+};
+enum PanelId
+{
+	P_SAVE, P_LOAD, P_SLOT_DOWN, P_SLOT_UP, P_KEYBOARD, P_POWER, P_MENU, P_BACK
+};
+const PanelButton kPanel[] = {
+	{60, 300, 540, 130, P_SAVE},       {640, 300, 540, 130, P_LOAD},
+	{60, 460, 160, 130, P_SLOT_DOWN},  {1020, 460, 160, 130, P_SLOT_UP},
+	{60, 620, 540, 130, P_KEYBOARD},      {640, 620, 540, 130, P_POWER},
+	{60, 780, 540, 130, P_MENU},       {640, 780, 540, 130, P_BACK},
+};
+struct Panel
+{
+	std::vector<uint32_t> px;
+	int slot = -1;
+	bool used = false;
+	std::string toast;
+	double toast_until = 0;
+	bool dirty = true;
+	int frames = 0; // (redrawn every frame through the fade)
+	std::string game;
+	int load = -1; // the game start it was drawn for
+	// the on-screen keyboard (instead of the buttons)
+	bool kbd = false;
+	bool held[RETROK_LAST] = {};    // under a finger
+	bool latched[RETROK_LAST] = {}; // Shift / Ctrl / Graph / Code tapped: down until the next key
+	bool down[RETROK_LAST] = {};    // what the MSX sees
+	int until[RETROK_LAST] = {};    // (a quick tap held a few frames, so the MSX's keyboard scan sees it)
+	int kframe = 0;
+} p;
+
+// ---- the MSX keyboard (international layout) ----
+struct KbKey
+{
+	const char* label;
+	const char* shift; // (the shifted character, small, top left)
+	unsigned k;        // RETROK_ (blueMSX's btn_map); 0: a gap
+	float w;           // in key widths
+};
+const KbKey kKbRows[6][16] = {
+	{{"F1", 0, RETROK_F1, 1.5f}, {"F2", 0, RETROK_F2, 1.5f}, {"F3", 0, RETROK_F3, 1.5f}, {"F4", 0, RETROK_F4, 1.5f},
+		{"F5", 0, RETROK_F5, 1.5f}, {"", 0, 0, 0.5f}, {"Stop", 0, RETROK_END, 1.5f}, {"Select", 0, RETROK_PAGEUP, 1.5f},
+		{"Home", 0, RETROK_HOME, 1.5f}, {"Ins", 0, RETROK_INSERT, 1.5f}, {"Del", 0, RETROK_DELETE, 1.5f}},
+	{{"Esc", 0, RETROK_ESCAPE, 1}, {"1", "!", RETROK_1, 1}, {"2", "@", RETROK_2, 1}, {"3", "#", RETROK_3, 1},
+		{"4", "$", RETROK_4, 1}, {"5", "%", RETROK_5, 1}, {"6", "^", RETROK_6, 1}, {"7", "&", RETROK_7, 1},
+		{"8", "*", RETROK_8, 1}, {"9", "(", RETROK_9, 1}, {"0", ")", RETROK_0, 1}, {"-", "_", RETROK_MINUS, 1},
+		{"=", "+", RETROK_EQUALS, 1}, {"\\", "|", RETROK_BACKSLASH, 1}, {"BS", 0, RETROK_BACKSPACE, 1.5f}},
+	{{"Tab", 0, RETROK_TAB, 1.5f}, {"Q", 0, RETROK_q, 1}, {"W", 0, RETROK_w, 1}, {"E", 0, RETROK_e, 1},
+		{"R", 0, RETROK_r, 1}, {"T", 0, RETROK_t, 1}, {"Y", 0, RETROK_y, 1}, {"U", 0, RETROK_u, 1}, {"I", 0, RETROK_i, 1},
+		{"O", 0, RETROK_o, 1}, {"P", 0, RETROK_p, 1}, {"[", "{", RETROK_BACKQUOTE, 1}, {"]", "}", RETROK_LEFTBRACKET, 1},
+		{"Return", 0, RETROK_RETURN, 2}},
+	{{"Ctrl", 0, RETROK_LCTRL, 1.75f}, {"A", 0, RETROK_a, 1}, {"S", 0, RETROK_s, 1}, {"D", 0, RETROK_d, 1},
+		{"F", 0, RETROK_f, 1}, {"G", 0, RETROK_g, 1}, {"H", 0, RETROK_h, 1}, {"J", 0, RETROK_j, 1}, {"K", 0, RETROK_k, 1},
+		{"L", 0, RETROK_l, 1}, {";", ":", RETROK_SEMICOLON, 1}, {"'", "\"", RETROK_QUOTE, 1},
+		{"`", "~", RETROK_RIGHTBRACKET, 1}, {"", 0, RETROK_RETURN, 1.75f}}, // (Return's lower half: one L-shaped key)
+	{{"Shift", 0, RETROK_LSHIFT, 2.25f}, {"Z", 0, RETROK_z, 1}, {"X", 0, RETROK_x, 1}, {"C", 0, RETROK_c, 1},
+		{"V", 0, RETROK_v, 1}, {"B", 0, RETROK_b, 1}, {"N", 0, RETROK_n, 1}, {"M", 0, RETROK_m, 1},
+		{",", "<", RETROK_COMMA, 1}, {".", ">", RETROK_PERIOD, 1}, {"/", "?", RETROK_SLASH, 1},
+		{"Dead", 0, RETROK_UNDERSCORE, 1}, {"Shift", 0, RETROK_RSHIFT, 2.25f}},
+	{{"Caps", 0, RETROK_CAPSLOCK, 1.5f}, {"Graph", 0, RETROK_LALT, 1.5f}, {"Space", 0, RETROK_SPACE, 6.5f},
+		{"Code", 0, RETROK_RALT, 1.5f}, {"<", 0, RETROK_LEFT, 1.125f}, {"^", 0, RETROK_UP, 1.125f},
+		{"v", 0, RETROK_DOWN, 1.125f}, {">", 0, RETROK_RIGHT, 1.125f}},
+};
+struct KbRect
+{
+	int x, y, w, h;
+	const KbKey* key;
+};
+constexpr int kKbTop = 165, kKbPitch = 150, kKbKeyH = 138, kKbMargin = 10, kKbGap = 6;
+const PanelButton kKbClose = {930, 26, 280, 110, -1};
+
+const std::vector<KbRect>& KbLayout()
+{
+	static std::vector<KbRect> v;
+	if (!v.empty())
+		return v;
+	const float u = (kMsxPanelW - 2 * kKbMargin) / 15.5f;
+	for (int r = 0; r < 6; r++)
+	{
+		float x = kKbMargin;
+		for (const KbKey& k : kKbRows[r])
+		{
+			if (k.w <= 0)
+				break;
+			if (k.k)
+				v.push_back({int(x), kKbTop + r * kKbPitch, int(x + k.w * u) - int(x), kKbKeyH, &k});
+			x += k.w * u;
+		}
+	}
+	return v;
+}
+
+bool KbModifier(unsigned k)
+{
+	return k == RETROK_LSHIFT || k == RETROK_RSHIFT || k == RETROK_LCTRL || k == RETROK_LALT || k == RETROK_RALT;
+}
+
+void KbClear()
+{
+	std::memset(p.held, 0, sizeof(p.held));
+	std::memset(p.latched, 0, sizeof(p.latched));
+	std::memset(p.down, 0, sizeof(p.down));
+	std::memset(p.until, 0, sizeof(p.until));
+	std::memset(g_touch_keys, 0, sizeof(g_touch_keys));
+}
+
+// the fingers -> the keys the MSX sees; true when that changed (redraw)
+bool KbFrame()
+{
+	int xs[8], ys[8];
+	const int n = msx_android_panel_fingers(xs, ys, 8);
+	bool held[RETROK_LAST] = {};
+	for (int i = 0; i < n; i++)
+		for (const KbRect& r : KbLayout())
+			if (xs[i] >= r.x - kKbGap / 2 && xs[i] < r.x + r.w + kKbGap / 2 && ys[i] >= r.y - (kKbPitch - kKbKeyH) / 2 &&
+				ys[i] < r.y + kKbKeyH + (kKbPitch - kKbKeyH) / 2)
+				held[r.key->k] = true;
+	p.kframe++;
+	bool changed = false, clear_latches = false;
+	for (const KbRect& r : KbLayout())
+	{
+		const unsigned k = r.key->k;
+		if (held[k] && !p.held[k])
+		{
+			if (KbModifier(k))
+				p.latched[k] = !p.latched[k];
+			else
+				p.until[k] = p.kframe + 4;
+		}
+	}
+	std::memcpy(p.held, held, sizeof(held));
+	bool down[RETROK_LAST] = {};
+	for (const KbRect& r : KbLayout())
+	{
+		const unsigned k = r.key->k;
+		down[k] = held[k] || p.latched[k] || (!KbModifier(k) && p.kframe < p.until[k]);
+		if (!down[k] && p.down[k] && !KbModifier(k))
+			clear_latches = true; // (a key typed: the latched Shift / Ctrl / Graph / Code let go)
+	}
+	if (clear_latches)
+		for (const KbRect& r : KbLayout())
+			if (p.latched[r.key->k])
+				p.latched[r.key->k] = false, down[r.key->k] = held[r.key->k];
+	for (unsigned k = 0; k < RETROK_LAST; k++)
+		if (down[k] != p.down[k])
+			changed = true;
+	std::memcpy(p.down, down, sizeof(down));
+	std::memcpy(g_touch_keys, down, sizeof(down));
+	return changed;
+}
+
+double PanelNow()
+{
+	timespec ts = {};
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+void Box(int x, int y, int w, int h, uint32_t c, int r = 22)
+{
+	for (int yy = std::max(0, y); yy < std::min(kMsxPanelH, y + h); yy++)
+		for (int xx = std::max(0, x); xx < std::min(kMsxPanelW, x + w); xx++)
+		{
+			// (rounded corners)
+			const int cx = xx < x + r ? x + r : xx >= x + w - r ? x + w - r - 1 : xx,
+					  cy = yy < y + r ? y + r : yy >= y + h - r ? y + h - r - 1 : yy;
+			if ((xx - cx) * (xx - cx) + (yy - cy) * (yy - cy) > r * r)
+				continue;
+			p.px[size_t(yy) * kMsxPanelW + xx] = c;
+		}
+}
+
+void DrawPanel()
+{
+	fe::Settings& cfg = fe::Config();
+	p.px.assign(size_t(kMsxPanelW) * kMsxPanelH, 0);
+	for (int y = 0; y < kMsxPanelH; y++)
+	{
+		const float t = float(y) / kMsxPanelH;
+		const uint32_t c = ps5video::Rgb(uint8_t(26 - 14 * t), uint8_t(22 - 12 * t), uint8_t(52 - 26 * t));
+		std::fill(p.px.begin() + size_t(y) * kMsxPanelW, p.px.begin() + size_t(y + 1) * kMsxPanelW, c);
+	}
+	const fe::Canvas cv{p.px.data(), kMsxPanelW, kMsxPanelH, kMsxPanelW};
+	const uint32_t text = ps5video::Rgb(235, 232, 250), dim = ps5video::Rgb(160, 150, 200);
+	const uint32_t btn = ps5video::Rgb(52, 44, 96), btn_off = ps5video::Rgb(36, 32, 60), accent = ps5video::Rgb(120, 100, 220);
+	if (p.kbd)
+	{
+		// the keyboard: a header with Close, then the keys (pressed: lit; a latched modifier: amber)
+		fe::DrawTextOn(cv, 50, 58, "MSX keyboard", 3, text);
+		Box(kKbClose.x, kKbClose.y, kKbClose.w, kKbClose.h, ps5video::Rgb(120, 100, 220));
+		fe::DrawTextOn(cv, kKbClose.x + (kKbClose.w - fe::TextWidth("Close", 3)) / 2, kKbClose.y + kKbClose.h / 2 - 22, "Close", 3, text);
+		for (const KbRect& r : KbLayout())
+		{
+			const unsigned k = r.key->k;
+			const bool lit = p.down[k] && !p.latched[k];
+			const uint32_t face = p.latched[k] ? ps5video::Rgb(230, 170, 60) : lit ? ps5video::Rgb(160, 140, 250) : btn;
+			Box(r.x + kKbGap / 2, r.y, r.w - kKbGap, r.h, face, 14);
+			const char* l = r.key->label;
+			if (!*l)
+			{
+				// the lower half of an L-shaped key: joined to the half above it (no gap, no label)
+				Box(r.x + kKbGap / 2, r.y - kKbPitch + kKbKeyH - 30, r.w - kKbGap, kKbPitch - kKbKeyH + 60, face, 0);
+				continue;
+			}
+			int s = 3;
+			while (s > 1 && fe::TextWidth(l, s) > r.w - kKbGap - 10)
+				s--;
+			const uint32_t ink = p.latched[k] ? ps5video::Rgb(30, 20, 10) : text;
+			const int ty = r.key->shift ? r.y + r.h / 2 - 8 : r.y + r.h / 2 - 22 * s / 3;
+			fe::DrawTextOn(cv, r.x + (r.w - fe::TextWidth(l, s)) / 2, ty, l, s, ink);
+			if (r.key->shift)
+				fe::DrawTextOn(cv, r.x + kKbGap / 2 + 10, r.y + 8, r.key->shift, 2, dim);
+		}
+		return;
+	}
+	const std::string name = fe::FitText(p.game, 4, kMsxPanelW - 120);
+	fe::DrawTextOn(cv, (kMsxPanelW - fe::TextWidth(name.c_str(), 4)) / 2, 90, name.c_str(), 4, text);
+	const std::string sys = SystemName() + "   -   tap a button";
+	fe::DrawTextOn(cv, (kMsxPanelW - fe::TextWidth(sys.c_str(), 2)) / 2, 190, sys.c_str(), 2, dim);
+	for (int y = 250; y < 254; y++)
+		for (int x = 60; x < kMsxPanelW - 60; x++)
+			p.px[size_t(y) * kMsxPanelW + x] = accent;
+	char buf[64];
+	for (const PanelButton& b : kPanel)
+	{
+		const char* label = "";
+		bool on = true;
+		switch (b.id)
+		{
+			case P_SAVE: snprintf(buf, sizeof(buf), "Save state"); label = buf; break;
+			case P_LOAD: label = "Load state"; on = p.used; break;
+			case P_SLOT_DOWN: label = "<"; break;
+			case P_SLOT_UP: label = ">"; break;
+			case P_KEYBOARD: label = "Keyboard"; break;
+			case P_POWER: label = "Power cycle"; break;
+			case P_MENU: label = "Menu"; break;
+			case P_BACK: label = "Back to the shelf"; break;
+		}
+		Box(b.x, b.y, b.w, b.h, on ? btn : btn_off);
+		const int s = 3;
+		fe::DrawTextOn(cv, b.x + (b.w - fe::TextWidth(label, s)) / 2, b.y + b.h / 2 - 22, label, s, on ? text : dim);
+	}
+	snprintf(buf, sizeof(buf), "State slot %d  %s", cfg.state_slot, p.used ? "(used)" : "(empty)");
+	fe::DrawTextOn(cv, (kMsxPanelW - fe::TextWidth(buf, 3)) / 2, 460 + 65 - 22, buf, 3, text);
+	if (!p.toast.empty() && PanelNow() < p.toast_until)
+		fe::DrawTextOn(cv, (kMsxPanelW - fe::TextWidth(p.toast.c_str(), 3)) / 2, 965, p.toast.c_str(), 3, ps5video::Rgb(255, 214, 90));
+	else
+	{
+		const char* hint = "L3 + R3: the full menu";
+		fe::DrawTextOn(cv, (kMsxPanelW - fe::TextWidth(hint, 2)) / 2, 975, hint, 2, dim);
+	}
+}
+
+// what was tapped (-1: nothing)
+int PanelTapped()
+{
+	int x, y;
+	if (!msx_android_panel_tap(x, y))
+		return -1;
+	for (const PanelButton& b : kPanel)
+		if (x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h)
+			return b.id;
+	return -1;
+}
+} // namespace
+#endif
+
 FrameResult RunFrame()
 {
 	if (!g.loaded)
 		return FrameResult::Stopped;
 	fe::Settings& cfg = fe::Config();
+#if defined(MSX_ANDROID)
+	{
+		// the game panel: what was tapped, then the picture when something changed (and through the fade)
+		if (p.load != g_load_count || p.game != GameName())
+		{
+			p.load = g_load_count, p.game = GameName(), p.frames = 0, p.dirty = true; // (every start: shown again, with the fade)
+			p.kbd = false, KbClear();
+		}
+		const auto toast = [&](const std::string& s) { p.toast = s, p.toast_until = PanelNow() + 2.0, p.dirty = true; };
+		if (p.kbd)
+		{
+			// the keyboard: Close (a tap) back to the buttons, the keys from the fingers
+			int tx, ty;
+			if (msx_android_panel_tap(tx, ty) && tx >= kKbClose.x && tx < kKbClose.x + kKbClose.w && ty >= kKbClose.y &&
+				ty < kKbClose.y + kKbClose.h)
+				p.kbd = false, KbClear(), p.dirty = true;
+			else if (KbFrame())
+				p.dirty = true;
+		}
+		else switch (PanelTapped())
+		{
+			case P_SAVE: toast(SaveState(cfg.state_slot) ? "State saved." : "Could not save the state."); break;
+			case P_LOAD:
+				if (StateExists(cfg.state_slot))
+					toast(LoadState(cfg.state_slot) ? "State loaded." : "Could not load the state.");
+				break;
+			case P_SLOT_DOWN: cfg.state_slot = (cfg.state_slot + 8) % 10 + 1, cfg.Save(), p.dirty = true; break;
+			case P_SLOT_UP: cfg.state_slot = cfg.state_slot % 10 + 1, cfg.Save(), p.dirty = true; break;
+			case P_KEYBOARD: p.kbd = true, KbClear(), p.dirty = true; break;
+			case P_POWER: PowerCycle(); toast("Power cycle."); break;
+			case P_MENU: return FrameResult::OpenMenu;
+			case P_BACK: return FrameResult::Stopped;
+			default: break;
+		}
+		const bool used = StateExists(cfg.state_slot);
+		if (used != p.used || cfg.state_slot != p.slot || (!p.toast.empty() && PanelNow() >= p.toast_until))
+		{
+			p.used = used, p.slot = cfg.state_slot, p.dirty = true;
+			if (PanelNow() >= p.toast_until)
+				p.toast.clear();
+		}
+		if (p.dirty || p.frames < 30)
+		{
+			if (p.dirty || p.px.empty())
+				DrawPanel();
+			msx_android_panel(p.px.data());
+			p.dirty = false;
+			p.frames++;
+		}
+	}
+#endif
 
 	// -- hot keys (player 1)
 	ps5input::Poll();

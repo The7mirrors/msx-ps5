@@ -33,10 +33,18 @@ std::string FitText(const std::string& utf8, int scale, int max_px);
 // PromptFont's controller symbols (the same code points as PS5SX2's fe_text.h).
 namespace icon
 {
+#if defined(MSX_ANDROID)
+// (the AYN Thor's face buttons by their place, with its printed letters: bottom B, right A, left Y, top X)
+constexpr const char* Cross = "\xE2\x87\x92";    // B
+constexpr const char* Circle = "\xE2\x87\x93";   // A
+constexpr const char* Triangle = "\xE2\x87\x90"; // X
+constexpr const char* Square = "\xE2\x87\x91";   // Y
+#else
 constexpr const char* Cross = "\xE2\x87\xA3";
 constexpr const char* Circle = "\xE2\x87\xA2";
 constexpr const char* Triangle = "\xE2\x87\xA1";
 constexpr const char* Square = "\xE2\x87\xA0";
+#endif
 constexpr const char* L1 = "\xE2\x86\xB0";
 constexpr const char* R1 = "\xE2\x86\xB1";
 constexpr const char* L2 = "\xE2\x86\xB2";
@@ -45,7 +53,11 @@ constexpr const char* L3 = "\xE2\x86\xBA";
 constexpr const char* R3 = "\xE2\x86\xBB";
 constexpr const char* DpadLeftRight = "\xE2\x86\xA2";
 constexpr const char* DpadUpDown = "\xE2\x86\xA3";
+#if defined(MSX_ANDROID)
+constexpr const char* Options = "\xE2\x87\xBB"; // Start
+#else
 constexpr const char* Options = "\xE2\x88\x88";
+#endif
 constexpr const char* GitHub = "\xEF\x82\x9B"; // U+F09B, Font Awesome Brands
 } // namespace icon
 } // namespace fe
